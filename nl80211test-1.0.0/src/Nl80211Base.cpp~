@@ -1,0 +1,378 @@
+// Nl80211Base.cpp
+
+// Base class sets up connection to nl80211 sub-system.
+
+#include "Nl80211Base.h"
+
+Nl80211Base::Nl80211Base(const char* name) : Log(name)
+{ }
+
+int Nl80211Base::list_interface_handler(struct nl_msg *msg, void *arg)
+{
+	nl80211CallbackInfo* info;
+	Nl80211Base* instance;
+	struct genlmsghdr *gnlh;
+	struct nlattr *tb_msg[NL80211_ATTR_MAX + 1];
+
+	int len;
+	uint32_t phyId;
+	const char *interfaceName;
+	const uint8_t *macAddress;
+
+	info = (nl80211CallbackInfo *)arg;
+	instance = info->m_pInstance;  // arg->m_pInstance == [this *]
+
+	gnlh = (genlmsghdr *)nlmsg_data(nlmsg_hdr(msg));
+	// Parse 'msg' into the 'tb_msg' array:
+	nla_parse(tb_msg, NL80211_ATTR_MAX, genlmsg_attrdata(gnlh, 0), genlmsg_attrlen(gnlh, 0), NULL);
+	// Need these values to fill a new OneInterface:
+	if (tb_msg[NL80211_ATTR_IFNAME]
+		&& tb_msg[NL80211_ATTR_WIPHY]
+		&& tb_msg[NL80211_ATTR_MAC])
+	{
+		phyId = nla_get_u32(tb_msg[NL80211_ATTR_WIPHY]);
+		interfaceName = nla_get_string(tb_msg[NL80211_ATTR_IFNAME]);
+		len = nla_len(tb_msg[NL80211_ATTR_MAC]);
+		macAddress = (uint8_t *)nla_data(tb_msg[NL80211_ATTR_MAC]);
+		instance->AddInterface(phyId, interfaceName, len, macAddress);
+	}
+	else
+	{
+		instance->LogInfo("Nl80211: GET_INTERFACEs callback; MISSING iface param!");
+	}
+	return NL_SKIP;
+}
+
+int Nl80211Base::finish_handler(struct nl_msg *msg, void *arg)
+{
+	// (static)
+	nl80211CallbackInfo* info = (nl80211CallbackInfo *)arg;
+	info->status = 0;
+	Nl80211Base* instance = info->m_pInstance;
+	instance->LogInfo("finish_handler() called");
+	// Caller checks:
+	//   while (info.status > 0)
+	//   {
+	//       nl_recvmsgs(wifi.nls, cb);
+	//   }
+	return NL_SKIP;
+}
+
+int Nl80211Base::error_handler(struct sockaddr_nl *nla, struct nlmsgerr *err, void *arg)
+{
+	// (static)
+	// An error occurred, set arg->errcode to (0 - err->error [a NEGATIVE int])
+	nl80211CallbackInfo* info = (nl80211CallbackInfo *)arg;
+	Nl80211Base* instance = info->m_pInstance;
+	instance->LogInfo("error_handler() called");
+	info->status = 0;
+	info->errcode = (0 - err->error);  // convert to positive errno (for sterror(), etc)
+
+	return NL_STOP;
+}
+
+int Nl80211Base::ack_handler(struct nl_msg *msg, void *arg)
+{
+	// (static). Complete.
+	nl80211CallbackInfo* info = (nl80211CallbackInfo *)arg;
+	Nl80211Base* instance = info->m_pInstance;
+	instance->LogInfo("ack_handler() called");
+	info->status = 0;
+
+	return NL_STOP;
+}
+
+void Nl80211Base::ClearInterfaceList()
+{
+	for (OneInterface *pI : m_interfaces)
+	{
+		delete pI;
+	}
+	m_interfaces.clear();
+	LogInfo("Nl80211: ClearInterfaceList()");
+}
+
+void Nl80211Base::AddInterface(uint32_t phyId, const char *interfaceName,
+		int macLength, const uint8_t *macAddress)
+{
+	string s("Nl80211: AddInterface [");
+	s += interfaceName;
+	s += "]";
+	LogInfo(s);
+	OneInterface *pI = new OneInterface(phyId, interfaceName, macAddress, macLength);
+	m_interfaces.push_back(pI);
+}
+
+bool Nl80211Base::FreeMessage()
+{
+	if (m_msg != nullptr)
+	{
+		nlmsg_free(m_msg);
+		m_msg = nullptr;
+	}
+	return true;
+}
+
+bool Nl80211Base::Close()
+{
+	if (m_sock != nullptr)
+	{
+		nl_socket_free(m_sock);
+		m_sock = nullptr;
+	}
+	if (m_cb != nullptr)
+	{
+		nl_cb_put(m_cb);
+		m_cb = nullptr;
+	}
+	return FreeMessage();
+}
+
+bool Nl80211Base::Open()
+{
+	m_sock = nl_socket_alloc();
+	if (m_sock == nullptr)
+	{
+		LogErr(AT, "Can't alloc netlink socket.");
+		return false;
+	}
+	nl_socket_set_buffer_size(m_sock, 8192, 8192);
+	if (genl_connect(m_sock))
+	{
+		LogErr(AT, "Can't connect to generic netlink.");
+		Close();
+		return false;
+	}
+// /usr/include/linux\nl80211.h:30:
+// #define NL80211_GENL_NAME "nl80211"
+	m_nl80211Id = genl_ctrl_resolve(m_sock, NL80211_GENL_NAME);
+	if (m_nl80211Id < 0)
+	{
+		LogErr(AT, "nl80211: Not found.");
+		Close();
+		return false;
+	}
+
+	return true;
+}
+
+bool Nl80211Base::GetInterfaceIndex(const char* ifaceName, uint32_t& deviceId)
+{
+	try
+	{
+		deviceId = if_nametoindex(ifaceName);
+	}
+	catch(...)
+	{
+		deviceId = 0;
+	}
+	if (deviceId == 0)
+	{
+		string s("Can't get Device Id for: [");
+		s += ifaceName;
+		s += "]";
+		LogErr(AT, s);
+		return false;
+	}
+	// else OK...
+	return true;
+}
+
+bool Nl80211Base::SetupCallback()
+{
+	m_cb = nl_cb_alloc(NL_CB_DEFAULT);
+	if (m_cb == nullptr)
+	{
+		LogErr(AT, "Can't allocate netlink callback.");
+		return false;
+	}
+
+	m_cbInfo.m_pInstance = this;
+	m_cbInfo.status = 1;
+	m_cbInfo.errcode = 0;
+
+	nl_cb_set(m_cb, NL_CB_VALID, NL_CB_CUSTOM, list_interface_handler, &m_cbInfo);
+	return true;
+}
+
+// flags: 0 or NLM_F_DUMP if repeating responses expected.
+// cmd:  NL80211_CMD_GET_INTERFACE - get List of interfaces
+//       NL80211_CMD_SET_WIPHY - set frequency
+bool Nl80211Base::SetupMessage(int flags, uint8_t cmd)
+{
+	m_msg = nlmsg_alloc();
+	if (m_msg == nullptr)
+	{
+		LogErr(AT, "Can't allocate NL message");
+		return false;
+	}
+
+	// Add Generic Netlink headers to Netlink message
+	// void *genlmsg_put(struct nl_msg *msg, uint32_t port, uint32_t seq,
+	//     int family, int hdrlen, int flags, uint8_t cmd, uint8_t version)
+	//
+	// Here is msg setup for SET FREQ:
+	// genlmsg_put(msg, 0, 0, genl_family_get_id(state.nl80211), 0,
+	//       0, NL80211_CMD_SET_WIPHY, 0);
+	
+ 	// Get list of interfaces:
+	//genlmsg_put(m_msg, 0, 0, m_nl80211Id, 0,
+	//	NLM_F_DUMP, NL80211_CMD_GET_INTERFACE, 0);
+	// Note: params 2 and 3 (0, 0) are
+	// NL_AUTO_PID and NL_AUTO_SEQ, which are both defined as zero
+	// For use with nl_send_auto(...) [ My: SendAndFreeMessage() ]
+
+	genlmsg_put(m_msg, 0, 0, m_nl80211Id, 0, flags, cmd, 0);
+	
+	return true;
+}
+
+// Add (unsigned) 32-bit parameter to the message.
+// Used, e.g., "NLA_PUT_U32(msg, NL80211_ATTR_IFINDEX, devid);" ==>
+//    "AddMessageParameterU32(NL80211_ATTR_IFINDEX, deviceId);"
+bool Nl80211Base::AddMessageParameterU32(enum nl80211_attrs parameterName, uint32_t value)
+{
+	NLA_PUT_U32(m_msg, parameterName, value);
+	return true;
+nla_put_failure:
+	LogErr(AT, "Can't Add Parameter");
+	return false;
+}
+
+bool Nl80211Base::AddMessageParameterString(enum nl80211_attrs parameterName, const char *value)
+{
+	NLA_PUT_STRING(m_msg, parameterName, value);
+	return true;
+nla_put_failure:
+	LogErr(AT, "Can't Add Parameter");
+	return false;
+}
+
+bool Nl80211Base::SendWithRepeatingResponses()
+{
+	// "nl_send_auto_complete: DEPRECATED, please use nl_send_auto()"
+//	nl_send_auto_complete(m_sock, m_msg);
+	nl_send_auto(m_sock, m_msg);
+	// m_cbInfo.status = 1;
+	// m_cb (an nl_cb *) can hold > 1 callback, calls finish_handler()
+	//   when FINISHed, and list_interface_handler() foreach interface
+	nl_cb_set(m_cb, NL_CB_FINISH, NL_CB_CUSTOM, finish_handler, &m_cbInfo);
+	nl_cb_err(m_cb, NL_CB_CUSTOM, error_handler, &m_cbInfo);
+	nl_cb_set(m_cb, NL_CB_ACK, NL_CB_CUSTOM, ack_handler, &m_cbInfo);
+	// finish_handler() method sets m_cbInfo->status to zero when complete.
+	// [So does error_handler() and ack_handler()}
+	while (m_cbInfo.status > 0)
+	{
+		nl_recvmsgs(m_sock, m_cb);
+	}
+	if (m_cbInfo.errcode != 0)
+	{
+		// error_handler() was called!
+		string s("Nl80211:SendWithRepeatingResp() ERROR: ");
+		s += strerror(m_cbInfo.errcode);
+		LogErr(AT, s);
+		return false;
+	}
+	// else OK:
+	return true;
+}
+
+// SetChannel() and Create[/Delete]VirtualInterface() will
+//   call this method to Send m_msg to nl80211,
+//   checks for error returned from nl80211.
+bool Nl80211Base::SendAndFreeMessage()
+{
+	int rv;
+	// "nl_send_auto_complete: DEPRECATED, please use nl_send_auto()"
+	// int nl_send_auto(struct nl_sock *sk, struct nl_msg *msg)
+	// SAME parameters, returns # of bytes sent OR negative error code
+	//   nl_send_auto_complete(m_sock, m_msg);  DEPRECATED...
+	rv = nl_send_auto(m_sock, m_msg);
+	if (rv < 0)
+	{
+		rv = 0 - rv;  // ==> positive error #.
+		stringstream s;
+		s << "Nl80211Base::SendAndFreeMessage: send_auto FAILED: ";
+		s << strerror(rv);
+		LogErr(AT, s);
+		FreeMessage();
+		return false;
+	}
+	// Wait for ACK from nl80211:
+	rv = nl_wait_for_ack(m_sock);  // 0: Succcess, <0: Error (w/errno)
+	if (rv < 0)
+	{
+		rv = 0 - rv;  // ==> positive error #.
+		// e.g. Unknown Interface name (EINVAL); multitude of possibilities...
+		stringstream s;
+		s << "Nl80211Base::SendAndFreeMessage: wait_for_ack returned ERROR: ";
+		s << strerror(rv);
+		LogErr(AT, s);
+		FreeMessage();
+		return false;
+	}
+	return FreeMessage();
+}
+/***
+ struct nl_sock *nls;
+        int nl80211_id;
+    } wifi;
+
+    wifi.nls = nl_socket_alloc();
+    if (!wifi.nls) {
+        fprintf(stderr, "Failed to allocate netlink socket.\n");
+        return EXIT_FAILURE;
+    }
+
+    int ret = EXIT_SUCCESS;
+
+    nl_socket_set_buffer_size(wifi.nls, 8192, 8192);
+
+    if (genl_connect(wifi.nls)) {
+        fprintf(stderr, "Failed to connect to generic netlink.\n");
+        ret = EXIT_FAILURE;
+        goto out_connect;
+    }
+
+    wifi.nl80211_id = genl_ctrl_resolve(wifi.nls, "nl80211");
+    if (wifi.nl80211_id < 0) {
+        fprintf(stderr, "nl80211 not found.\n");
+        ret = EXIT_FAILURE;
+        goto out_connect;
+    }
+
+    struct nl_msg *msg = nlmsg_alloc();
+    if (!msg) {
+        fprintf(stderr, "Failed to allocate netlink message.\n");
+        ret = EXIT_FAILURE;
+        goto out_connect;
+    }
+
+    struct nl_cb *cb = nl_cb_alloc(NL_CB_DEFAULT);
+    if (!cb) {
+        fprintf(stderr, "Failed to allocate netlink callback.\n");
+        ret = EXIT_FAILURE;
+        goto out_alloc;
+    }
+
+    nl_cb_set(cb, NL_CB_VALID, NL_CB_CUSTOM, list_interface_handler, NULL);
+
+    genlmsg_put(msg, 0, 0, wifi.nl80211_id, 0,
+            NLM_F_DUMP, NL80211_CMD_GET_INTERFACE, 0);
+
+    nl_send_auto_complete(wifi.nls, msg);
+
+    int err = 1;
+
+    nl_cb_set(cb, NL_CB_FINISH, NL_CB_CUSTOM, finish_handler, &err);
+
+    while (err > 0)
+        nl_recvmsgs(wifi.nls, cb);
+
+    nl_cb_put(cb);
+
+out_alloc:
+    nlmsg_free(msg);
+out_connect:
+nl_socket_free(wifi.nls);
+****/

@@ -1,0 +1,150 @@
+// Nl80211Base.h
+// Base class sets up connection to nl80211 sub-system
+//   and handles low-level calls to it.
+
+#ifndef NL80211BASE_H_
+#define NL80211BASE_H_
+
+#include <iostream>
+#include <string>
+#include <sstream>
+#include <vector>
+
+// Use: "-I /usr/include/libnl3/" - doesn't work w/shadowx, use these:
+// LATER: In the *BITBAKE RECIPE* add:
+//     DEPENDS = " libnl [other crap shx needs, e.g.: protobuf openssl bluez5 libpcap gpsd"
+//     RDEPENDS_${PN} = " libnl ..."
+// I think you only need DEPENDS but it didn't hurt anything to also have RDEPENDS
+// (and it worked so leave it alone...)
+// This clause adds needed files/folders to ../tmp/work/cortex.../shadowx/3.0.0/
+//     recipe-sysroot/usr/include/
+// "recipe-sysroot" folder actually has a bitbake step b4 do_compile "Populating
+// recipe-sysroot folder" (more than just usr/include; everything you need)
+// For example, there is now an "openssl" folder for ssl.h that wasn't present before.
+// I *think* we can remove "protobuf-dev / -dbg / -compiler" from shadowx-image.bb now.
+// We will still have to add the "-I/linbl3" or whatever it was though
+// since these are in recipe-sysroot/usr/include/libnl3/ (IIRC).
+// Leave these for now, update if necessary:
+#include "netlink/socket.h"
+#include "netlink/netlink.h"
+#include "netlink/genl/genl.h"
+#include "netlink/genl/family.h"
+#include "netlink/genl/ctrl.h"
+
+#include "net/if.h"  // if_nametoindex (can __THROW); note: conflicts with linux/if.h
+
+#include <linux/nl80211.h>
+
+#include <stdint.h>
+
+#include "OneInterface.h"
+#include "Log.h"
+
+using namespace std;
+
+// fwd def:
+class Nl80211Base;
+
+// this is the "arg *" we're going to
+// pass back to our nl80211 callback
+typedef struct
+{
+	Nl80211Base* m_pInstance;
+	int status;
+} nl80211CallbackInfo;
+
+class Nl80211Base : protected Log
+{
+public:
+	Nl80211Base(const char* name);
+	// The NL80211_CMD_GET_INTERFACE command has two callback functions:
+	static int finish_handler(struct nl_msg *msg, void *arg);
+	// 'arg' is the last parameter to the xxx call:
+	// int nl_cb_set(struct nl_cb *cb, enum nl_cb_type type,
+	//      enum nl_cb_kind kind, nl_recvmsg_msg_cb_t func,
+	//      void *arg <== this guy);
+	// Example:
+	//     nl_cb_set(cb, NL_CB_VALID, NL_CB_CUSTOM, list_interface_handler, NULL);
+	static int list_interface_handler(struct nl_msg *msg, void *arg);
+	
+	bool Close();
+	bool FreeMessage();
+	bool Open();
+	bool GetInterfaceIndex(const char* ifaceName);  // Stores ==> m_deviceId (used by: ChannelSetter)
+	bool GetInterfaceIndex(const char* ifaceName, uint32_t& deviceId);
+	bool SetupCallback();
+	// flags: 0 or NLM_F_DUMP if repeating responses expected.
+	// cmd:  NL80211_CMD_GET_INTERFACE - get List of interfaces
+	//       NL80211_CMD_SET_WIPHY - set frequency
+	bool SetupMessage(int flags, uint8_t cmd);
+	bool AddMessageParameterU32(enum nl80211_attrs parameterName, uint32_t value);
+	// Call this when expecting multiple responses [e.g., GetInterfaceList()]:
+	bool SendWithRepeatingResponses();
+	// Send with no mult [e.g., SetChannel()]
+	bool SendAndFreeMessage();
+	void ClearInterfaceList();
+	void AddInterface(uint32_t phyId, const char *interfaceName,
+		int macLength, const uint8_t *macAddress);
+protected:
+	Nl80211Base() { }
+	uint32_t m_deviceId;
+	vector<OneInterface *> m_interfaces;
+private:
+	struct nl_sock *m_sock = nullptr;
+	struct nl_msg *m_msg = nullptr;
+	struct nl_cb *m_cb = nullptr;
+	int32_t m_nl80211Id;
+	nl80211CallbackInfo m_cbInfo;
+};
+
+/*****
+C-style callbacks in C++:
+From:
+http://tanks4code.blogspot.com/2008/07/c-style-callbacks-in-c-code.html
+
+// this is the "additional information" we're going to
+// pass back to our callback
+typedef struct
+{
+  // stuff
+} callbackInfo;
+
+// this is the callback prototype
+typedef void (*cbfunc)(const callbackInfo*, void*);
+===========================================================
+User Side:
+// BB: Don't we need "CDecl" (or something like that) so the
+//   Calling Convention is right? Does the called method or
+//   the Caller do the stack cleanup? Apparently not...
+//
+// this is the "callback side" (user) class
+class CallMe
+{
+public:
+  CallMe()
+  {
+    globalCaller.registerCB(&myCallback, this);
+  }
+  ~CallMe()
+  {
+    globalCaller.deregisterCB(&myCallback, this);
+  }
+  static void myCallback(const callbackInfo* info, void* userData)
+  {
+    if (!userData) return;
+    ((CallMe*)userData)->localCallback(info);
+  }
+  void localCallback(const callbackInfo* info)
+  {
+    // do stuff
+  }
+}
+//
+// The NL80211_CMD_GET_INTERFACE command has two callback functions:
+//    static int finish_handler(struct nl_msg *msg, void *arg)
+// and:
+//    static int list_interface_handler(struct nl_msg *msg, void *arg)
+******/
+
+#endif  // NL80211BASE_H_
+
