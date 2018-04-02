@@ -23,8 +23,6 @@
 #include <stdint.h>
 
 //#define	IFNAMSIZ	16   // linux/if.h
-// Note: IFNAMSIZ is also defined (if not already exists) in netlink/netlink-compat.h)
-//       so this is not that important...
 #define SHX_IFNAMESIZE 16
 
 // ioctl() commands:

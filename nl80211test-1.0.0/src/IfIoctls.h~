@@ -34,6 +34,8 @@ public:
 	~IfIoctls();
 	bool BringInterfaceUp(const char *interfaceName);
 	bool BringInterfaceDown(const char *interfaceName);
+	bool GetInterfaceFlags(const char *interfaceName, int& rawFlags, bool& isUp, bool& isRunning);
+	bool SetIpAddressAndNetmask(const char *ifaceName, const char *ipAddress, const char *netmask);
 	bool SetMacAddress(const char *ifaceName, const uint8_t *mac, bool isMonitorMode);
 	bool SetWirelessPowerSaveOff(const char *ifaceName);
 private:

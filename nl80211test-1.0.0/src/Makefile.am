@@ -13,6 +13,10 @@ nl80211test_SOURCES = \
 	Nl80211InterfaceAdmin.cpp \
 	Log.cpp \
 	Nl80211Base.cpp \
-	IfIoctls.cpp
+	IfIoctls.cpp \
+	HostapdManager.cpp \
+	Terminator.cpp
+
+
 
 

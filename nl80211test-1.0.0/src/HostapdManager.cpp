@@ -1,0 +1,242 @@
+// HostapdManager.cpp
+
+#include "HostapdManager.h"
+
+// Write a brand-new UDHCPD Conf file if its not present / is malformed...
+bool HostapdManager::WriteNewDhcpdConf(const char *interfaceName)
+{
+	ofstream out(m_dhcpConfName, ios_base::out | ios_base::trunc);
+	if (!out.good())
+	{
+		LogErr(AT, "WriteNewDhcpdConf(): Can't create new udhcpd.conf!");
+		return false;
+	}
+	// There are hundreds of options, we will just set the minimum needed
+	// and use udhcpd's default values for the rest...
+	out <<
+		"start          " << m_dhcpStart << "\n" <<
+		"end            " << m_dhcpEnd << "\n" <<
+		"interface      " << interfaceName << "\n";
+
+	return true;  // out closes automatically...
+}
+
+// UpdateDhcpConf(): Find the line "interface    wlan[X]"
+// and change it to:  interface   [ifaceName] in /etc/udhcpd.conf:
+bool HostapdManager::UpdateDhcpConf(const char *interfaceName)
+{
+	string oneLine;
+	bool found = false;
+	ifstream in(m_dhcpConfName, ifstream::in);  // "/etc/udhcpd.conf"
+	if (!in.good())
+	{
+		return WriteNewDhcpdConf(interfaceName);
+	}
+	ofstream out(m_dhcpConfTempName, ios_base::out | ios_base::trunc);  // "/etc/udhcpd.temp"
+
+	while (getline(in, oneLine))
+	{
+		if (oneLine.substr(0, 9) == "interface")
+		{
+			out << "interface      " << interfaceName << "\n";
+			found = true;
+		}
+		else
+		{
+			out << oneLine << "\n";
+		}
+	}
+	in.close();
+	out.close();
+
+	if (!found)
+	{
+		LogErr(AT, "Could not find 'interface' line in udhcpd.conf, resetting to default...");
+		return WriteNewDhcpdConf(interfaceName);
+	}
+	// out (/etc/udhcpd.temp) contains the updated interface line.
+	// Replace udhcpd.conf with udhcpd.temp.
+	if (remove(m_dhcpConfName) != 0)  // /etc/udhcpd.conf
+	{
+		int myErr = errno;
+		string s("Can't remove old udhcpd.conf: ");
+		s += strerror(myErr);
+		s += ", will try to reset.";
+		LogErr(AT, s);
+		return WriteNewDhcpdConf(interfaceName);
+	}
+	// rename /etc/udhcpd.temp to /etc/udhcpd.conf:
+	if (rename(m_dhcpConfTempName, m_dhcpConfName) != 0)
+	{
+		int myErr = errno;
+		string s("Can't rename udhcpd.temp to udhcpd.conf: ");
+		s += strerror(myErr);
+		s += ", udhcpd.conf is DELETED. Will try to reset.";
+		LogErr(AT, s);
+		return WriteNewDhcpdConf(interfaceName);
+	}
+	return true;
+}
+
+// The default hostapd.conf can't be found / is malformed...
+// Write a new default version of it.
+bool HostapdManager::WriteNewHostapdConf(const char *interfaceName)
+{
+	ofstream out(m_hostapdConfName, ios_base::out | ios_base::trunc);
+	if (!out.good())
+	{
+		LogErr(AT, "WriteNewHostapdConf(): Can't open hostapd.conf!");
+		return false;
+	}
+	out <<
+		"interface=" << interfaceName << "\n" <<
+		"driver=nl80211\n" <<
+		"channel=11\n" <<
+		"ssid=ShadowX\n" <<
+		"ignore_broadcast_ssid=1\n" <<
+		"wpa=3\n" <<
+		"wpa_passphrase=srt!4101\n" <<
+		"rsn_pairwise=CCMP\n";
+	return true;  // out closes automatically...
+}
+
+// UpdateHostapdConf(): Find the line "interface=wlan[X]"
+// and change it to:  interface=[ifaceName] in /etc/hostapd.conf:
+bool HostapdManager::UpdateHostapdConf(const char *interfaceName)
+{
+	string oneLine;
+	bool found = false;
+	ifstream in(m_hostapdConfName, ifstream::in);  // "/etc/hostapd.conf"
+	if (!in.good())
+	{
+		return WriteNewHostapdConf(interfaceName);
+	}
+	ofstream out(m_hostapdConfTempName, ios_base::out | ios_base::trunc);  // "/etc/hostapd.temp"
+
+	while (getline(in, oneLine))
+	{
+		if (oneLine.substr(0, 9) == "interface")
+		{
+			out << "interface=" << interfaceName << "\n";
+			found = true;
+		}
+		else
+		{
+			out << oneLine << "\n";
+		}
+	}
+	in.close();
+	out.close();
+
+	if (!found)
+	{
+		LogErr(AT, "Could not find 'interface' line in hostapd.conf, resetting to default...");
+		return WriteNewHostapdConf(interfaceName);
+	}
+	// out (/etc/hostapd.temp) contains the updated interface line.
+	// Replace hostapd.conf with hostapd.temp.
+	if (remove(m_hostapdConfName) != 0)  // /etc/hostapd.conf
+	{
+		int myErr = errno;
+		string s("Can't remove old hostapd.conf: ");
+		s += strerror(myErr);
+		s += ", will try to reset.";
+		LogErr(AT, s);
+		return WriteNewHostapdConf(interfaceName);
+	}
+	// rename /etc/hostapd.temp to /etc/hostapd.conf:
+	if (rename(m_hostapdConfTempName, m_hostapdConfName) != 0)
+	{
+		int myErr = errno;
+		string s("Can't rename hostapd.temp to hostapd.conf: ");
+		s += strerror(myErr);
+		s += ", hostapd.conf is DELETED. Will try to reset.";
+		LogErr(AT, s);
+		return WriteNewHostapdConf(interfaceName);
+	}
+	return true;
+}
+
+bool HostapdManager::StartHostapd()
+{
+	InterfaceManagerNl80211 *im;
+	IfIoctls ifIoctls;
+	const char *apName;
+	im = InterfaceManagerNl80211::GetInstance();
+	apName = im->GetApInterfaceName();
+	// Set the AP interface's IP address and netmask.
+	// This used to be done automatically in /etc/network/interfaces
+	// "auto wlan0 / iface wlan0 inet static / address 192.168.40.1 / netmask 255.255.255.0"
+	// BUT - the TI chip does NOT always come up as wlan0! 
+	// Rather than using an arcane / obscure u-dev rule to force its name, since we are
+	// already doing this interface work here for both the TI and the USB (monitor) radio,
+	// just set it up here directly; more obvious and less "back water" kernel tricks
+	// to set up on a new ShadowX box...
+	//     m_apIpAddress is: "192.168.40.1"
+	//     m_apNetmask is: "255.255.255.0"
+	if (!ifIoctls.SetIpAddressAndNetmask(apName, m_apIpAddress, m_apNetmask))
+	{
+		LogErr(AT, "StartHostApd(): Could not set AP Interfaces MAC address, aborting.");
+		return false;
+	}
+
+	// Update the DHCP (udhcpd.conf) file with the new interface:
+	if (!UpdateDhcpConf(apName))
+	{
+		return false;
+	}
+
+	// Find the line "interface=wlan[X]" and change it to:
+	//   interface=[apName] in /etc/hostapd.conf
+	if (!UpdateHostapdConf(apName))
+	{
+		return false;
+	}
+
+	// Start hostapd: (the -B option means Background):
+	// hostapd [−hdBKtv] [−P <PID file>] <configuration file(s)>
+	// PID file: /var/run/hostapd.pid
+	// exec...() funcs replace the current executable, so run on a fork:
+	pid_t pid = fork();
+	if (pid < 0)
+	{
+		int myErr = errno;
+		string s("Can't fork to start hostapd: ");
+		s += strerror(myErr);
+		LogErr(AT, s);
+		return false;
+	}
+	// else, PID = 0 means I am child, or > 0 is the new PID and I am the parent.
+	if (pid == 0)
+	{
+		execlp("/usr/sbin/hostapd", "hostapd", "-B", m_hostapdConfName, (char *)nullptr);
+		// If here, then there was an error launching execlp(); we *should* NEVER get here.
+		LogErr(AT, "Can't start hostapd");
+		exit(0);
+	}
+	// else: If here, PID > 0; I am the parent. Start DHCP daemon (udhcpd).
+	// Do we need to wait for the interface to be up? Don't know, we shall see...
+	pid = fork();
+	if (pid < 0)
+	{
+		int myErr = errno;
+		string s("Can't fork to start uphcpd: ");
+		s += strerror(myErr);
+		LogErr(AT, s);
+		return false;
+	}
+	// else, PID = 0 means I am child, or > 0 is the new PID and I am the parent.
+	if (pid == 0)
+	{
+		// -S: Log to syslog (DHCPD_OPTS="-S" in /etc/default/udhcpd)
+		// /etc/init.d/udhcpd:  ... start) start-stop-daemon --start --verbose --pidfile /var/run/$NAME.pid
+		//		--oknodo --exec $DAEMON -- $DHCPD_OPTS
+		// (Don't see any config file option... Hmmm...)
+		execlp("/usr/sbin/udhcpd", "udhcpd", "-S", (char *)nullptr);
+		// If here, then there was an error launching execlp(); we *should* NEVER get here.
+		LogErr(AT, "Can't start uphcpd");
+		exit(0);
+	}
+	// else: If here, PID > 0; I am the parent. All done.
+	return true;
+}

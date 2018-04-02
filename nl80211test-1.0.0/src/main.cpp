@@ -65,15 +65,34 @@ http://elixir.free-electrons.com/linux/latest/source/include/uapi/linux/nl80211.
 using namespace std;
 using namespace chrono;
 
+#include <sys/types.h>
+#include <unistd.h>
+
 #include "Nl80211Base.h"
 #include "Log.h"
 #include "IfIoctls.h"
 #include "InterfaceManagerNl80211.h"
+#include "Terminator.h"
+#include "HostapdManager.h"
+#include "ChannelSetterNl80211.h"
 
 void wait(const char *msg)
 {
 	cout << msg << ", wait 15..." << endl;
 	this_thread::sleep_for(seconds(15));
+}
+
+void ShowResult(const char *who, bool rv)
+{
+	cout << "main(): " << who << ":" << endl;
+	if (rv)
+	{
+		cout << "Success." << endl;
+	}
+	else
+	{
+		cout << "FAILED!" << endl;
+	}
 }
 
 void AddAnInterface(InterfaceManagerNl80211 *im)
@@ -111,8 +130,12 @@ void AddAnInterface(InterfaceManagerNl80211 *im)
 			rv = im->CreateApInterface(in.c_str(), phyId);
 			break;
 	}
-	cout << rv ? "Success" : "FAILED";
-	cout << endl;
+	ShowResult("Add Interface", rv);
+	cout << "Note:" << endl;
+	cout << "  For a NEW INTERFACE on the TI chip:" << endl;
+	cout << "    1. Create it (just did)" << endl;
+	cout << "    2. SET POWER SAVE OFF [VERY IMPORTANT!]" << endl;
+	cout << "    3. Then Bring the Interface UP" << endl;
 }
 
 void BringIfaceUpOrDown(IfIoctls *ifIoctls, bool up)
@@ -121,7 +144,14 @@ void BringIfaceUpOrDown(IfIoctls *ifIoctls, bool up)
 	bool rv;
 	cout << "=====================" << endl;
 	cout << "Bring Interface ";
-	cout << up ? "UP" : "DOWN";
+	if (up)
+	{
+		cout << "UP";
+	}
+	else
+	{
+		cout << "DOWN";
+	}
 	cout << "." << endl;
 	cout << "  Interface name? ";
 	getline(cin, in);
@@ -133,8 +163,20 @@ void BringIfaceUpOrDown(IfIoctls *ifIoctls, bool up)
 	{
 		rv = ifIoctls->BringInterfaceDown(in.c_str());
 	}
-	cout << rv ? "Success" : "FAILED";
-	cout << endl;
+	ShowResult("Interface UP/DOWN", rv);
+}
+
+void SetPowerSaveOff(IfIoctls *ifIoctls)
+{
+	string iface("");
+	bool rv;
+
+	cout << "===================" << endl;
+	cout << "Set Power Save Off:" << endl << "Interface Name:" << endl << "? ";
+	
+	getline(cin, iface);
+	rv = ifIoctls->SetWirelessPowerSaveOff(iface.c_str());
+	ShowResult("Set Power Save OFF", rv);
 }
 
 void SetAnInterfacesMode(InterfaceManagerNl80211 *im)
@@ -167,9 +209,183 @@ void SetAnInterfacesMode(InterfaceManagerNl80211 *im)
 	}
 	cout << "Interface name? " << endl;
 	getline(cin, iface);
+	cout << "Calling nl80211 function. This can take up to forty seconds, please wait..." << endl;
+	auto startTime = system_clock::now();
 	rv = im->SetInterfaceMode(iface.c_str(), type);
-	cout << rv ? "SUCCESS" : "FAILED!";
-	cout << endl;
+	auto doneTime = system_clock::now();
+	auto dur = doneTime - startTime;
+	milliseconds ms = duration_cast<milliseconds>(dur);
+	int mstot = ms.count();
+	int seconds = mstot / 1000;
+	mstot %= 1000;
+	cout << "COMPLETED in " << seconds << "." << mstot << " seconds." << endl;
+	ShowResult("Set Interface Mode", rv);
+}
+
+
+bool SetupInterfaces(IfIoctls *ifIoctls, InterfaceManagerNl80211 *im)
+{
+	string in("");
+	bool quit = false;
+	cout << endl <<
+		"+=======================================================+" << endl;
+	cout <<
+		"|==================== Interface Setup ==================|" << endl;
+	cout <<
+		"+=======================================================+" << endl;
+	bool shutdown = false;
+	do
+	{
+		cout << "INFO: ================= Interfaces: =================" << endl;
+		im->LogInterfaceList("Interfaces found:");
+
+		cout << endl << endl << "Options:" << endl <<
+			"1. List Interfaces" << endl <<
+			"2. Add Interface" << endl <<
+			"3. Set Iface Mode" << endl <<
+			"4. Iface UP" << endl <<
+			"5. Iface DOWN" << endl <<
+			"6. Set Power Save OFF" << endl <<
+			"7. Exit Interface Setup" << endl <<
+			"8. Quit" << endl;
+			"? ";
+		getline(cin, in);
+		switch (in[0])
+		{
+			case '1':  // List Interfaces
+			case 'l':
+				im->GetInterfaceList();
+				im->LogInterfaceList("Interfaces found:");
+				break;
+			case '2':  // Add Interface
+				AddAnInterface(im);
+				break;
+			case '3':  // Set Iface Mode
+				SetAnInterfacesMode(im);
+				break;
+			case '4':  // Iface UP
+				BringIfaceUpOrDown(ifIoctls, true);
+				break;
+			case '5':  // Iface DOWN
+				BringIfaceUpOrDown(ifIoctls, false);
+				break;
+			case '6':  // Set Power Save OFF.
+				SetPowerSaveOff(ifIoctls);
+				break;
+			case '7':
+			case 'x':
+				cout << "Exiting..." << endl;
+				quit = true;
+				break;
+			case '8':
+			case 'q':
+				quit = true;
+				shutdown = true;
+				break;
+		}
+	} while (!quit);
+	return shutdown;
+}
+
+
+bool RunTerminator()
+{
+	Terminator term;
+	string in("");
+	bool quit = false;
+	cout << endl <<
+		"+=======================================================+" << endl;
+	cout <<
+		"|====================== Terminator =====================|" << endl;
+	cout <<
+		"+=======================================================+" << endl;
+	bool shutdown = false;
+	bool rv;
+	do
+	{
+		cout << endl << endl << "Options:" << endl <<
+			"1. Kill hostapd(s)" << endl <<
+			"2. Kill wpa_supplicant(s)" << endl <<
+			"3. Kill process(es) by name" << endl <<
+			"4. Exit Terminator" << endl <<
+			"5. Quit" << endl;
+			"? ";
+		getline(cin, in);
+		switch (in[0])
+		{
+			case '1':
+			case 'h':
+				rv = term.Terminate("hostapd", getpid());
+				ShowResult("Killall hostapd: Terminate returned", rv);
+				break;
+			case '2':
+			case 'w':
+				rv = term.Terminate("wpa_supplicant", getpid());
+				ShowResult("Killall wpa_supplicant: Terminate returned", rv);
+				break;
+			case '3':
+			case 'k':
+				cout << "Process Name? ";
+				getline(cin, in);
+				rv = term.Terminate(in.c_str(), getpid());
+				ShowResult("Terminate returned", rv);
+				break;
+			case '4':
+				quit = true;
+				break;
+			case '5':
+			case 'q':
+				quit = true;
+				shutdown = true;
+				break;
+		}
+	} while (!quit);
+	return shutdown;
+}
+
+int ChannelChangeTest()
+{
+	int chan;
+	ChannelSetterNl80211 cs;
+	bool rv;
+	
+	string in("");
+
+	cout << "Channel Change Test." <<
+		"Hit Enter when ready to start..." << endl <<
+		"? ";
+	
+	getline(cin, in);
+
+	rv = cs.OpenConnection();
+	ShowResult("ChannelSetter Open()", rv);
+	if (!rv)
+	{
+		return false;
+	}
+	
+	for (chan = 1; chan <= 13; chan++)
+	{
+		cout << "Setting to chan: " << chan << "..." << endl;
+		auto startTime = system_clock::now();
+		rv = cs.SetChannel(chan);
+		if (!rv)
+		{
+			cout << "SetChannel() failed... Channel Change Test aborted." << endl << endl;
+			return false;
+		}
+		auto doneTime = system_clock::now();
+		auto dur = doneTime - startTime;
+		milliseconds ms = duration_cast<milliseconds>(dur);
+		int mstot = ms.count();
+		int seconds = mstot / 100;
+		mstot %= 1000;
+		cout << "Channel set in " << seconds << "." << mstot << " seconds, sleep(1)..." << endl;
+		this_thread::sleep_for(milliseconds(1000))
+	}
+	cs.CloseConnection();
+	cout << "Channel Change Test complete..." << endl << endl;
+	return false;
 }
 
 int main(int argc, char* argv[])
@@ -177,34 +393,9 @@ int main(int argc, char* argv[])
 	Log l;
 	bool rv;
 	IfIoctls ifIoctls;
-/* This is now done by Nl80211IfaceMgr's Init():	
-// TEMP test...
-
-if (!ifIoctls.SetWirelessPowerSaveOff("wlan0"))
-{
-	cout << "main(): Set Power Save Off wlan0 failed, continuing..." << endl;
-}
-else
-{
-	cout << "main(): Set Power Save Off wlan0 success!" << endl;
-}
-
-if (!ifIoctls.SetWirelessPowerSaveOff("wlan1"))
-{
-	cout << "main(): Set Power Save Off wlan1 failed, continuing..." << endl;
-}
-else
-{
-	cout << "main(): Set Power Save Off wlan1 success!" << endl;
-}
-*/
-	// Here we need to choose InterfaceManagerNl80211 or InterfaceManagerWext
-	// (the latter is not implemented, so no real choice...)
+	HostapdManager apMgr;
 	//   IInterfaceManager im;  <== A ptr in real use,
 	//   this is a Singleton class; main instantiates
-	// Need a GetInstance() function here.
-	//InterfaceManagerNl80211 im("InterfaceManagerNl80211");
-	//im.GetInterfaceList();
 	InterfaceManagerNl80211 *im = InterfaceManagerNl80211::GetInstance();
 	cout << "main(): calling Init()..." << endl;
 	// Init() gets all current Wi-Fi interfaces into a list for us.
@@ -221,6 +412,10 @@ else
 	// BEFORE attempting to bring the interface UP.
 	// (equiv cmd line: iwconfig [wlan0] power off
 	// and then "iwconfig [wlan0]" will show "Power Management:off"
+	// MUCH LATER: I added a clause something like usb.powersave=off (?) to
+	//   the Linux start-up command line [it is in kernel's menuconfig]
+	//   and this doesn't seem to be a problem anymore, new interfaces
+	//   show up in iwconfig as "Power Management:off"
 	
 	rv = im->Init();
 	if (!rv)
@@ -228,49 +423,41 @@ else
 		cout << "main(): Init() failed!" << endl;
 		return 0;
 	}
-	// ifIoctls.BringInterfaceUp(const char *interfaceName) and BringInterfaceDown(const char *interfaceName) [bool]
-	string in = "";
+	
+	string in("");
 	bool quit = false;
-
-	im->LogInterfaceList("Interfaces found:");
+	// Three distinct parts at startup.
+	// 1. Terminate instances of shadowx, hostapd, wpa_supplicant.
+	// 2. Set up the interfaces.
+	// 3. start hostapd (HostapdManager)
 	do
 	{
-		// cout << endl << endl << "Options:" << endl << "1. List Interfaces" << endl <<
-		//		"2. Add Interface" << endl << "3. Set Iface Mode" << endl <<
-		//		"4. Set Power Save OFF" << endl << "5. Quit" << endl << "? ";
-
-		cout << endl << endl << "Options:" << endl <<
-			"1. List Interfaces" << endl <<
-			"2. Add Interface" << endl <<
-			"3. Set Iface Mode" << endl <<
-			"4. Iface UP" << endl <<
-			"5. Iface DOWN" << endl <<
-			"6. Set Power Save OFF" << endl <<
-			"7. Quit" << endl << "? ";
+		cout << endl << endl <<
+			"=========== Main Startup Options ============" << endl <<
+			"1. Terminator" << endl <<
+			"2. Setup Interfaces" << endl <<
+			"3. Start Hostapd" << endl <<
+			"4. Run Channel Change Test" << endl <<
+			"5. Quit" << endl <<
+			"? ";
 		getline(cin, in);
 		switch (in[0])
 		{
-			case '1':  // List Interfaces
-				im->GetInterfaceList();
-				im->LogInterfaceList("Interfaces found:");
+			case '1':  // Terminator
+			case 't':
+				quit = RunTerminator();
 				break;
-			case '2':  // Add Interface
-				AddAnInterface(im);
+			case '2':  // Setup Interfaces
+				quit = SetupInterfaces(&ifIoctls, im);
 				break;
-			case '3':  // Set Iface Mode
-				SetAnInterfacesMode(im);
+			case '3':  // Start hostapd
+				apMgr.StartHostapd();
 				break;
-			case '4':  // Iface UP
-				BringIfaceUpOrDown(&ifIoctls, true);
-				break;
-			case '5':  // Iface DOWN
-				BringIfaceUpOrDown(&ifIoctls, false);
-				break;
-			case '6':  // Set Power Save OFF.
-				cout << "Set Power Save OFF: not done yet..." << endl;
-				break;
-			case '7':
-				cout << "Quitting..." << endl;
+			case '4':  // Channel Change Test
+			case 'c':
+				 quit = ChannelChangeTest();
+			case '5':
+			case 'q':
 				quit = true;
 				break;
 		}

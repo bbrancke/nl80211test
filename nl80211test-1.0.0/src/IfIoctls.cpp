@@ -45,7 +45,7 @@ bool IfIoctls::GetFlags(const char *interfaceName, int& flags)
 	}
 
 	memset(&ifr, 0, sizeof(struct ifreq));
-	strncpy(ifr.ifr_name, interfaceName, IFNAMSIZ);
+	strncpy(ifr.ifr_name, interfaceName, SHX_IFNAMESIZE);
 	if (ioctl(m_fd, SIOCGIFFLAGS, &ifr) < 0)
 	{
 		int myErr = errno;
@@ -70,7 +70,7 @@ bool IfIoctls::SetFlags(const char *interfaceName, int flags)
 	}
 
 	memset(&ifr, 0, sizeof(struct ifreq));
-	strncpy(ifr.ifr_name, interfaceName, IFNAMSIZ);
+	strncpy(ifr.ifr_name, interfaceName, SHX_IFNAMESIZE);
 	ifr.ifr_flags = (short)flags;
 	if (ioctl(m_fd, SIOCSIFFLAGS, &ifr) < 0)
 	{
@@ -126,6 +126,47 @@ bool IfIoctls::GetInterfaceFlags(const char *interfaceName, int& rawFlags, bool&
 	return true;
 }
 
+bool IfIoctls::SetIpAddressAndNetmask(const char *ifaceName, const char *ipAddress, const char *netmask)
+{
+	struct ifreq ifr;
+	struct sockaddr_in sa;
+
+	if (!Open())
+	{
+		return false;
+	}
+
+	memset(&ifr, 0, sizeof(struct ifreq));
+	strncpy(ifr.ifr_name, ifaceName, SHX_IFNAMESIZE);
+	memset(&sa, 0, sizeof(struct sockaddr_in));
+	sa.sin_family = AF_INET;
+	inet_aton(ipAddress, &sa.sin_addr);
+	memcpy(&(ifr.ifr_addr), &sa, sizeof(sa));
+	if (ioctl(m_fd, SIOCSIFADDR, &ifr) < 0)
+	{
+		int myErr = errno;
+		Close();
+		string s("SetIpAddressAndNetmask: Can't set addr (SIOCSIFADDR): ");
+		s += strerror(myErr);
+		LogErr(AT, s);
+		return false;
+	}
+
+	inet_aton(netmask, &sa.sin_addr);
+	memcpy(&(ifr.ifr_addr), &sa, sizeof(sa));
+	if (ioctl(m_fd, SIOCSIFNETMASK, &ifr) < 0)
+	{
+		int myErr = errno;
+		Close();
+		string s("SetIpAddressAndNetmask: Can't set netmask (SIOCSIFNETMASK): ");
+		s += strerror(myErr);
+		LogErr(AT, s);
+		return false;
+	}
+	Close();
+	return true;
+}
+
 bool IfIoctls::SetMacAddress(const char *ifaceName, const uint8_t *mac, bool isMonitorMode)
 {
 	struct ifreq ifr;
@@ -136,7 +177,7 @@ bool IfIoctls::SetMacAddress(const char *ifaceName, const uint8_t *mac, bool isM
 
 	memset(&ifr, 0, sizeof(struct ifreq));
 	memcpy(&ifr.ifr_hwaddr.sa_data, mac, 6);
-	strncpy(ifr.ifr_name, ifaceName, IFNAMSIZ);
+	strncpy(ifr.ifr_name, ifaceName, SHX_IFNAMESIZE);
 	// For a normal 80211 interface (STA / AP)
 	// sa_family is ONE (Ethernet 10/100Mbps), this is ARPHRD_ETHER (== 1)
 	// (see /usr/include/net/if_arp.h)

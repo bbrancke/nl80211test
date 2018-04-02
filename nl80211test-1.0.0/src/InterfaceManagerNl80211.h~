@@ -17,6 +17,7 @@
 #include <stdint.h>
 
 #include "Log.h"
+#include "ShxWireless.h"
 #include "OneInterface.h"
 #include "Nl80211InterfaceAdmin.h"
 #include "IfIoctls.h"
@@ -43,8 +44,13 @@ public:
 	// Next main() can start hostapd and begin surveys.
 	//
 	// Survey-ChannelChanger->ChannelSet class calls this
-	// (currently I ALWAYS return "mon0"):
+	// (can be wlan0 or wlan1, whichever is the USB radio)
+	// Note the Realtek driver DOES *NOT* work if you set
+	//   up a Virtual Interface under wlan1 (0);
+	//   LEAVE THE NAME THAT IT COMES UP AS ALONE!
 	const char *GetMonitorInterfaceName();
+	const char *GetApInterfaceName();
+	const char *GetStaInterfaceName();
 private:
 	InterfaceManagerNl80211();  // Private so that ctor can't be called
 	static InterfaceManagerNl80211* m_pInstance;
@@ -53,13 +59,19 @@ private:
 	// BringUp() says "Interface name not unique"
 	// No that is not it. sta0 comes up fine as a STA; wlan0 is a STA
 	// Let us try ap0 as a STA and see if hostapd can bring ap0 up as an AP...
+	// LATER: Can't have two interfaces with the same IP address,
+	//        that's what causes "not unique" error. D'oh...
 	//   TODO: Shouldn't we have members for STATION VIF name and MON0 VIF name too?
 	// Was in the process of deleting this, but it does remove A LOT of "ap0"s from the code...
 	const char *m_apName = "ap0";
+	const char *m_staName = "sta0";
+	char m_monName[SHX_IFNAMESIZE];
 	IfIoctls m_ifIoctls;
-	bool GetTiInterfaceList(vector<OneInterface *>& tiInterfaces);
+	bool CategorizeInterfaceList();
 	bool GetInterfaceByPhyAndName(uint32_t phyId, const char *name,
 		OneInterface **iface);
+	vector<OneInterface *> m_tiInterfaces;
+	vector<OneInterface *> m_notTiInterfaces;
 };
 
 

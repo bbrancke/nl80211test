@@ -51,7 +51,7 @@ bool InterfaceManagerNl80211::Init()
 		LogErr(AT, "InterfaceManagerNl80211::Init() can't get Interface List");
 		return false;
 	}
-	// Create a vector<(uint42_t)PhyId> from m_interfaces.
+	// Create a vector<(uint32_t)PhyId> from m_interfaces.
 	// This should have a count of two when done, or return false (ERROR, # of physical devices NOT two).
 	vector<uint32_t>phys;
 	for (OneInterface* i : m_interfaces)
@@ -85,6 +85,33 @@ bool InterfaceManagerNl80211::Init()
 			LogErr(AT, s);
 		}
 	}
+	// Fills m_tiInterfaces and m_notTiInterfaces (vectors)
+	// These lists will be invalid once we add / change Interfaces...
+	if (!CategorizeInterfaceList())
+	{
+		// FATAL, no TI chipset detected.
+		LogErr(AT, "Init(): FATAL: No TI phy found, reboot required.");
+		return false;
+	}
+	// Each Device should have only ONE Virtual Interface (VIF) at startup:
+	// FOR NOW, require reboot if > 1 of either...
+	if (m_tiInterfaces.size() != 1)
+	{
+		LogErr(AT, "Number of TI VIFs is not one, reboot required.");
+		return false;
+	}
+	if (m_notTiInterfaces.size() != 1)
+	{
+		LogErr(AT, "Number of USB radio VIFs is not one, reboot required.");
+		return false;
+	}
+	// This will be the Hostapd ap's interface name:
+	OneInterface *oneIface = m_tiInterfaces[0];
+	strncpy(m_apName, oneIface->name, SHX_IFNAMESIZE);
+	// This will be the monitor/survey interface name:
+	oneIface = m_notTiInterfaces[0];
+	strncpy(m_monName, oneIface->name, SHX_IFNAMESIZE);
+	cout << "AP INTERFACE NAME: [" << m_apName << "], MONITOR INTERFACE NAME: [" << m_monName << "]" << endl;
 	return true;
 }
 
@@ -92,8 +119,8 @@ bool InterfaceManagerNl80211::Init()
 //   "wlan0" interface info and "wlan1" interface info, and
 //   this will return a single interface: "wlan0" most of the time
 //   (but might be *"wlan1"*).
-bool InterfaceManagerNl80211::GetTiInterfaceList(
-	vector<OneInterface *>& tiInterfaces)
+// Fills m_tiInterfaces and m_notTiInterfaces (type: vector<OneInterface *>)
+bool InterfaceManagerNl80211::CategorizeInterfaceList()
 {
 	bool found = false;
 	for (OneInterface* i : m_interfaces)
@@ -104,7 +131,11 @@ bool InterfaceManagerNl80211::GetTiInterfaceList(
 		if (memcmp(m_TiChipsetOui, i->mac, 3) == 0)
 		{
 			found = true;
-			tiInterfaces.push_back(i);
+			m_tiInterfaces.push_back(i);
+		}
+		else
+		{
+			m_notTiInterfaces.push_back(i);
 		}
 	}
 	return found;
@@ -199,66 +230,10 @@ bool InterfaceManagerNl80211::GetInterfaceByPhyAndName(uint32_t phyId,
 // BEFORE attempting to bring the interface UP.
 // (equiv cmd line: iwconfig [wlan0] power off
 // and then "iwconfig [wlan0]" will show "Power Management:off"
-bool InterfaceManagerNl80211::CreateInterfaces()
-{
-	OneInterface *oneIface;
-	vector<OneInterface *> tiInterfaces;
-	bool found;
-	uint32_t phyId;
-// For debug, show InterfaceList:
-LogInterfaceList("CreateInterfaces Entry");
 
-	// Get list of Interfaces now using the TI chip:
-	// Need the phy ID for the TI chip, look for OUI (first 3 bytes)
-	// of "D0-B5-C2"
-	// If ShadowX is restarted, we longer have "wlan0" but should have
-	// "sta0" and "ap0" whose MAC addresses begin with D0-B5-C2.
-	found = GetTiInterfaceList(tiInterfaces);
-	if (!found)
-	{
-		// FATAL, can't even create ap0!
-		LogErr(AT, "CreateInterfaces(): FATAL: No TI phy found!");
-		return false;
-	}
-	oneIface = tiInterfaces[0];
-	phyId = oneIface->phy;
-
-	// Frank thinks that ALL the TI chips will have the SAME MAC address
-	// across all ShadowX devices, so randomize the AP and STA interface
-	// MAC addresses:
-	uint8_t mac[6];
-	memcpy(mac, m_TiChipsetOui, 3);
-	mac[3] = rand() % 256;
-	mac[4] = rand() % 256;
-	mac[5] = rand() % 256;
-
-	// Create and bring up 'sta0' interface first on the TI-phy.
-	// 'sta0' will send alert emails for us.
-	// Do we already have VIF "sta0"?
-	if (GetInterfaceByPhyAndName(phyId, "sta0", &oneIface))
-	{
-		LogInfo("CreateInterfaces(): sta0 already exists, not creating.");
-		// Exists, bring it down:
-		if (!m_ifIoctls.BringInterfaceDown("sta0"))
-		{
-			LogErr(AT, "CreateInterfaces(): Can't bring Interface sta0 down.");
-			return false;
-		}
-	}
-	else
-	{
-		if (!CreateStationInterface("sta0", phyId))
-		{
-			LogErr(AT, "CreateInterfaces(): Can't create Interface sta0!");
-			return false;
-		}
-		// A NEW interface starts out DOWN.
-	}
-	// Set Power Save OFF on all newly created interfaces.
-	
-	/*** When here, the sta0 interface is created but not UP ...
+/***
 NOTE ON POWER MANAGEMENT:
-iwconfig wlan0  == the underlying phy we create sta0 from.
+iwconfig wlan0  == the underlying phy (the TI chipset) we create sta0 from.
    Power Management:off
 
 Then added sta0, crashes on BringInterfaceUP()
@@ -286,7 +261,61 @@ sta0      Link encap:Ethernet  HWaddr D0:B5:C2:CD:93:11
 iwconfig sta0 shows Power Management:off
 
 tldr: Conclusion: Set Power Save Mode OFF before bringing the interface UP.
-	****/
+****/
+bool InterfaceManagerNl80211::CreateInterfaces()
+{
+	OneInterface *oneIface;
+	bool found;
+	uint32_t phyId;
+// For debug, show InterfaceList:
+LogInterfaceList("CreateInterfaces Entry");
+
+	// Get list of Interfaces now using the TI chip:
+	// Need the phy ID for the TI chip, look for OUI (first 3 bytes)
+	// of "D0-B5-C2"
+	// If ShadowX is restarted, we longer have "wlan0" but should have
+	// "sta0" and "ap0" whose MAC addresses begin with D0-B5-C2.
+	
+	oneIface = m_tiInterfaces[0];
+	phyId = oneIface->phy;
+
+	// Frank thinks that ALL the TI chips will have the SAME MAC address
+	// across all ShadowX devices, so randomize the AP and STA interface
+	// MAC addresses:
+	uint8_t mac[6];
+	memcpy(mac, m_TiChipsetOui, 3);
+	mac[3] = rand() % 256;
+	mac[4] = rand() % 256;
+	mac[5] = rand() % 256;
+
+	// Create and bring up 'sta0' interface first on the TI-phy.
+	// 'sta0' will send alert emails for us.
+	// Do we already have VIF "sta0"?
+	if (GetInterfaceByPhyAndName(phyId, m_staName, &oneIface))
+	{
+		LogInfo("CreateInterfaces(): sta0 already exists, not creating.");
+		// Exists, bring it down:
+		if (!m_ifIoctls.BringInterfaceDown("sta0"))
+		{
+			LogErr(AT, "CreateInterfaces(): Can't bring Interface sta0 down.");
+			return false;
+		}
+	}
+	else
+	{
+		if (!CreateStationInterface(m_staName, phyId))
+		{
+			LogErr(AT, "CreateInterfaces(): Can't create Interface sta0!");
+			return false;
+		}
+		// A NEW interface starts out DOWN.
+	}
+	// Set Power Save OFF on all newly created interfaces.
+	// When here, the sta0 interface is created but not UP
+
+	// ALL NEWLY CREATED INTERFACED:
+	// Set Power Save Mode OFF before bringing the interface UP.
+
 	// This particular software version of the TI wl-18xx crashes badly when
 	// entering power save mode (power save is fractions of a second). When
 	// power returns it has thrown away something critical (can't remember
@@ -294,7 +323,7 @@ tldr: Conclusion: Set Power Save Mode OFF before bringing the interface UP.
 	// unrecoverable error.
 	// This is the programatic equiv of "iwconfig sta0 power off" --
 	//   disable Power Save Mode.
-	if (!m_ifIoctls.SetWirelessPowerSaveOff("sta0"))
+	if (!m_ifIoctls.SetWirelessPowerSaveOff(m_staName))
 	{
 		LogErr(AT, "SetWirelessPowerSaveOff(sta0) failed, continuing anyway.");
 	}
@@ -303,12 +332,12 @@ tldr: Conclusion: Set Power Save Mode OFF before bringing the interface UP.
 		LogInfo("Power Save Off on sta0.");
 	}
 
-	if (!m_ifIoctls.SetMacAddress("sta0", mac, false))
+	if (!m_ifIoctls.SetMacAddress(m_staName, mac, false))
 	{
 		LogErr(AT, "CreateInterfaces(): Can't set Interface sta0's MAC address, continuing...");
 	}
 	// Bring UP the interface:
-	if (!m_ifIoctls.BringInterfaceUp("sta0"))
+	if (!m_ifIoctls.BringInterfaceUp(m_staName))
 	{
 		LogErr(AT, "CreateInterfaces(): Can't bring Interface sta0 up.");
 		return false;
@@ -383,7 +412,7 @@ LogInterfaceList("CreateInterfaces: II");
 	{
 		if (i->phy == phyId &&
 			(strcmp(i->name, m_apName) != 0) &&
-			(strcmp(i->name, "sta0") != 0))
+			(strcmp(i->name, m_staName) != 0))
 		{
 			m_ifIoctls.BringInterfaceDown(i->name);
 			if (!DeleteInterface(i->name))
@@ -440,7 +469,7 @@ LogInterfaceList("CreateInterfaces: II");
 	{
 		LogErr(AT, "SetWirelessPowerSaveOff(mon0) failed, continuing anyway.");
 	}
-	elsessh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQCVqBW89hxVtuaJfcR8kpDVLU1SF0AZFm6WUl31eRlPUp6ZZpFG1iARpy7TLyOTiyibrOSHP6csZzOlH8z35aOO8Ku5cf7nxmkhLUX312l1BzqovVE8rZxIelf7qVvwmK+fMxSFhKDAzq3HoMw9pE0286Z/qPMl1EYyos2qu/4lGRocEU9vVb1q+cQWmBPgnVk+ptc3yMs5V543Ury2CdO5lO48Pa8DFS5PbeVDgyICbg3aMzEYboFCewmnK0uBmsE1JR05nh7izsTQ8m9El27p61WPDsffnYtDnokjWLaPa4exi+k6XrwYzS0U8giV4PVqFelAUE2T4Q0TkHsehO6B bbrancke@srtrl.com
+	else
 	{
 		LogInfo("Power Save Off on mon0.");
 	}
@@ -480,8 +509,20 @@ LogInterfaceList("CreateInterfaces: COMPLETE");
 const char *InterfaceManagerNl80211::GetMonitorInterfaceName()
 {
 	// Called by Survey's ChannelChange->ChannelSetter class.
-	// Currently this ALWAYS "mon0" but this may change if re-creating
-	// a troubled iface name does not succeed.
-	return "mon0";
+	// This is the iface name of the USB radio. The Realtek
+	// driver does not support Virtual Interfaces, it just
+	// doesn't work. So this will be wlan1 or wlan0, whichever
+	// it came up as.
+	return m_monName;
+}
+
+const char *InterfaceManagerNl80211::GetApInterfaceName()
+{
+	return m_apName;
+}
+
+const char *InterfaceManagerNl80211::GetStaInterfaceName()
+{
+	return m_staName;
 }
 
