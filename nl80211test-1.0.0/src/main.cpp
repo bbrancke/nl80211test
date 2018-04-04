@@ -60,6 +60,7 @@ http://elixir.free-electrons.com/linux/latest/source/include/uapi/linux/nl80211.
 #include <string>
 #include <sstream>
 #include <chrono>
+#include <ctime>
 #include <thread>
 
 using namespace std;
@@ -366,8 +367,9 @@ int ChannelChangeTest()
 	
 	for (chan = 1; chan <= 13; chan++)
 	{
-		cout << "Setting to chan: " << chan << "..." << endl;
-		auto startTime = system_clock::now();
+		cout << endl << "Setting to chan: " << chan << "..." << endl;
+		//auto startTime = system_clock::now();
+		time_point<system_clock>startTime = system_clock::now();
 		rv = cs.SetChannel(chan);
 		if (!rv)
 		{
@@ -378,10 +380,16 @@ int ChannelChangeTest()
 		auto dur = doneTime - startTime;
 		milliseconds ms = duration_cast<milliseconds>(dur);
 		int mstot = ms.count();
-		int seconds = mstot / 100;
+		int seconds = mstot / 1000;
 		mstot %= 1000;
-		cout << "Channel set in " << seconds << "." << mstot << " seconds, sleep(1)..." << endl;
-		this_thread::sleep_for(milliseconds(1000))
+		time_t startTtp = system_clock::to_time_t(startTime);
+		time_t doneTtp = system_clock::to_time_t(doneTime);
+		cout << 
+			"Channel set complete:" << endl <<
+		 	"    Started: " << ctime(&startTtp) <<
+		 	"  Completed: " << ctime(&doneTtp) <<
+		 	"   Duration: " << seconds << "." << mstot << " seconds, sleep(4)..." << endl;
+		this_thread::sleep_for(milliseconds(4000));
 	}
 	cs.CloseConnection();
 	cout << "Channel Change Test complete..." << endl << endl;
@@ -456,6 +464,7 @@ int main(int argc, char* argv[])
 			case '4':  // Channel Change Test
 			case 'c':
 				 quit = ChannelChangeTest();
+				 break;
 			case '5':
 			case 'q':
 				quit = true;

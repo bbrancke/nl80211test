@@ -60,6 +60,7 @@ http://elixir.free-electrons.com/linux/latest/source/include/uapi/linux/nl80211.
 #include <string>
 #include <sstream>
 #include <chrono>
+#include <ctime>
 #include <thread>
 
 using namespace std;
@@ -74,6 +75,7 @@ using namespace chrono;
 #include "InterfaceManagerNl80211.h"
 #include "Terminator.h"
 #include "HostapdManager.h"
+#include "ChannelSetterNl80211.h"
 
 void wait(const char *msg)
 {
@@ -342,6 +344,59 @@ bool RunTerminator()
 	return shutdown;
 }
 
+int ChannelChangeTest()
+{
+	int chan;
+	ChannelSetterNl80211 cs;
+	bool rv;
+	
+	string in("");
+
+	cout << "Channel Change Test." <<
+		"Hit Enter when ready to start..." << endl <<
+		"? ";
+	
+	getline(cin, in);
+
+	rv = cs.OpenConnection();
+	ShowResult("ChannelSetter Open()", rv);
+	if (!rv)
+	{
+		return false;
+	}
+	
+	for (chan = 1; chan <= 13; chan++)
+	{
+		cout << endl << "Setting to chan: " << chan << "..." << endl;
+		//auto startTime = system_clock::now();
+		time_point<system_clock>startTime = system_clock::now();
+		rv = cs.SetChannel(chan);
+		if (!rv)
+		{
+			cout << "SetChannel() failed... Channel Change Test aborted." << endl << endl;
+			return false;
+		}
+		auto doneTime = system_clock::now();
+		auto dur = doneTime - startTime;
+		milliseconds ms = duration_cast<milliseconds>(dur);
+		int mstot = ms.count();
+		int seconds = mstot / 1000;
+		mstot %= 1000;
+		time_t startTtp = system_clock::to_time_t(startTime);
+		time_t doneTtp = system_clock::to_time_t(doneTime);
+		cout << 
+			"Channel set complete:" << endl <<
+		 	"    Started: " << ctime(&startTtp) <<
+		 	"  Completed: " << ctime(&doneTtp) <<
+		 	"   Duration: " << seconds << "." << mstot << " seconds, sleep(4)..." << endl;
+		this_thread::sleep_for(milliseconds(4cd
+		000));
+	}
+	cs.CloseConnection();
+	cout << "Channel Change Test complete..." << endl << endl;
+	return false;
+}
+
 int main(int argc, char* argv[])
 {
 	Log l;
@@ -391,7 +446,8 @@ int main(int argc, char* argv[])
 			"1. Terminator" << endl <<
 			"2. Setup Interfaces" << endl <<
 			"3. Start Hostapd" << endl <<
-			"4. Quit" << endl <<
+			"4. Run Channel Change Test" << endl <<
+			"5. Quit" << endl <<
 			"? ";
 		getline(cin, in);
 		switch (in[0])
@@ -406,7 +462,11 @@ int main(int argc, char* argv[])
 			case '3':  // Start hostapd
 				apMgr.StartHostapd();
 				break;
-			case '4':
+			case '4':  // Channel Change Test
+			case 'c':
+				 quit = ChannelChangeTest();
+				 break;
+			case '5':
 			case 'q':
 				quit = true;
 				break;

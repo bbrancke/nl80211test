@@ -1,5 +1,5 @@
 ACLOCAL_AMFLAGS = ${ACLOCAL_FLAGS} -I m4
-AM_CXXFLAGS = -std=c++11
+AM_CXXFLAGS = -std=c++11 -g
 # MY_LIBS   =-lm -lrt -ldl -lpcap -lcrypto -L $(TINYXML) -ltiny -lbluetooth 
 # AM_LDFLAGS = -lprotobuf -ldl -lpcap -lssl -lcrypto -lrt -lbluetooth -lgps -lpthread
 AM_LDFLAGS = -lnl-genl-3 -lnl-3

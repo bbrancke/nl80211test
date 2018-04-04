@@ -9,6 +9,8 @@
 #include <string>
 #include <sstream>
 
+#include <stdint.h>
+
 #include "Log.h"
 #include "Nl80211Base.h"
 #include "InterfaceManagerNl80211.h"
@@ -16,14 +18,14 @@
 
 using namespace std;
 
-class ChannelSetterNl80211 : public IChannelSetter, public Nl80211Base
+class ChannelSetterNl80211 : public Nl80211Base
 {
 public:
 	ChannelSetterNl80211();
-	virtual bool OpenConnection();
-	virtual bool SetChannel(uint32_t channel);
-	virtual bool CloseConnection();
-	virtual ~ChannelSetterNl80211();
+	bool OpenConnection();
+	bool SetChannel(uint32_t channel);
+	bool CloseConnection();
+	~ChannelSetterNl80211();
 private:
 	uint32_t ChannelToFrequency(uint32_t channel);
 	uint32_t m_interfaceIndex;

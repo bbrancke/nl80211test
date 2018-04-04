@@ -11,6 +11,7 @@
 
 #include "Log.h"
 #include "Nl80211Base.h"
+#include "InterfaceManagerNl80211.h"
 #include "IChannelSetter.h"
 
 using namespace std;
