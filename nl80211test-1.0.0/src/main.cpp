@@ -358,7 +358,7 @@ int ChannelChangeTest()
 	
 	getline(cin, in);
 
-	rv = cs.OpenConnection();
+	rv = cs.OpenConnection2();
 	ShowResult("ChannelSetter Open()", rv);
 	if (!rv)
 	{
@@ -370,7 +370,7 @@ int ChannelChangeTest()
 		cout << endl << "Setting to chan: " << chan << "..." << endl;
 		//auto startTime = system_clock::now();
 		time_point<system_clock>startTime = system_clock::now();
-		rv = cs.SetChannel(chan);
+		rv = cs.SetChannel2(chan);
 		if (!rv)
 		{
 			cout << "SetChannel() failed... Channel Change Test aborted." << endl << endl;
@@ -391,7 +391,7 @@ int ChannelChangeTest()
 		 	"   Duration: " << seconds << "." << mstot << " seconds, sleep(4)..." << endl;
 		this_thread::sleep_for(milliseconds(4000));
 	}
-	cs.CloseConnection();
+	cs.CloseConnection2();
 	cout << "Channel Change Test complete..." << endl << endl;
 	return false;
 }

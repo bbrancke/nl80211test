@@ -76,8 +76,106 @@ See /usr/include/linux/nl80211.h
 	return SendAndFreeMessage();
 }
 
+// This is how aircrack sets channel:
+bool ChannelSetterNl80211::OpenConnection2()
+{
+    int err;
+    struct nl80211_state *state = &m_state;  //(hack...)
+
+    state->nl_sock = nl_socket_alloc();
+
+    if (!state->nl_sock) {
+        fprintf(stderr, "Failed to allocate netlink socket.\n");
+//        return -ENOMEM;
+        return false;
+    }
+
+    if (genl_connect(state->nl_sock)) {
+        fprintf(stderr, "Failed to connect to generic netlink.\n");
+        err = -ENOLINK;
+        goto out_handle_destroy;
+    }
+
+    if (genl_ctrl_alloc_cache(state->nl_sock, &state->nl_cache)) {
+        fprintf(stderr, "Failed to allocate generic netlink cache.\n");
+        err = -ENOMEM;
+        goto out_handle_destroy;
+    }
+
+    state->nl80211 = genl_ctrl_search_by_name(state->nl_cache, "nl80211");
+    if (!state->nl80211) {
+        fprintf(stderr, "nl80211 not found.\n");
+        err = -ENOENT;
+        goto out_cache_free;
+    }
+
+//    return 0;
+    return true;
+
+ out_cache_free:
+    nl_cache_free(state->nl_cache);
+ out_handle_destroy:
+    nl_socket_free(state->nl_sock);
+//    return err;
+    cout << "Open2 FAILED" << endl;
+    return false;
+}
+
+
+bool ChannelSetterNl80211::CloseConnection2()
+{
+	struct nl80211_state *state = &m_state;  //(hack...)
+    genl_family_put(state->nl80211);
+    nl_cache_free(state->nl_cache);
+    nl_socket_free(state->nl_sock);
+	return true;
+}
+
+bool ChannelSetterNl80211::SetChannel2(int channel)
+{
+    unsigned int devid;
+    struct nl_msg *msg;
+    unsigned int freq;
+    int err;
+    unsigned int htval = NL80211_CHAN_NO_HT;
+
+/* libnl stuff */
+
+    devid=if_nametoindex("wlan1");   //  HACK !!! wi->wi_interface);
+//    freq=ieee80211_channel_to_frequency(channel);
+    freq = (unsigned int) ChannelToFrequency((uint32_t) channel);
+    msg=nlmsg_alloc();
+    if (!msg) {
+        fprintf(stderr, "failed to allocate netlink message\n");
+//        return 2;
+        return false;
+    }
+// 	genlmsg_put(m_msg, 0, 0, m_nl80211Id, 0, flags, cmd, 0);
+    genlmsg_put(msg, 0, 0, genl_family_get_id(m_state.nl80211), 0,
+            0, NL80211_CMD_SET_WIPHY, 0);
+
+    NLA_PUT_U32(msg, NL80211_ATTR_IFINDEX, devid);
+    NLA_PUT_U32(msg, NL80211_ATTR_WIPHY_FREQ, freq);
+    NLA_PUT_U32(msg, NL80211_ATTR_WIPHY_CHANNEL_TYPE, htval);
+
+    nl_send_auto_complete(m_state.nl_sock,msg);
+    nlmsg_free(msg);
+
+//    dev->channel = channel;
+
+//    return( 0 );
+    return true;
+
+nla_put_failure:
+    printf("PUT FAILURE!\n");
+    return false;
+//    return -ENOBUFS;
+}
+
+
 bool ChannelSetterNl80211::CloseConnection()
 {
+cout << "TODO: Close nl80211 Connection!!" << endl;
 	return true;
 }
 

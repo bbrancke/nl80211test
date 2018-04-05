@@ -16,6 +16,7 @@ int Nl80211Base::list_interface_handler(struct nl_msg *msg, void *arg)
 
 	int len;
 	uint32_t phyId;
+	uint32_t interfaceType;
 	const char *interfaceName;
 	const uint8_t *macAddress;
 
@@ -28,13 +29,15 @@ int Nl80211Base::list_interface_handler(struct nl_msg *msg, void *arg)
 	// Need these values to fill a new OneInterface:
 	if (tb_msg[NL80211_ATTR_IFNAME]
 		&& tb_msg[NL80211_ATTR_WIPHY]
-		&& tb_msg[NL80211_ATTR_MAC])
+		&& tb_msg[NL80211_ATTR_MAC]
+		&& tb_msg[NL80211_ATTR_IFTYPE])
 	{
 		phyId = nla_get_u32(tb_msg[NL80211_ATTR_WIPHY]);
+		interfaceType = nla_get_u32(tb_msg[NL80211_ATTR_IFTYPE]);
 		interfaceName = nla_get_string(tb_msg[NL80211_ATTR_IFNAME]);
 		len = nla_len(tb_msg[NL80211_ATTR_MAC]);
 		macAddress = (uint8_t *)nla_data(tb_msg[NL80211_ATTR_MAC]);
-		instance->AddInterface(phyId, interfaceName, len, macAddress);
+		instance->AddInterfaceToList(phyId, interfaceName, len, macAddress, interfaceType);
 	}
 	else
 	{
@@ -92,14 +95,10 @@ void Nl80211Base::ClearInterfaceList()
 	LogInfo("Nl80211: ClearInterfaceList()");
 }
 
-void Nl80211Base::AddInterface(uint32_t phyId, const char *interfaceName,
-		int macLength, const uint8_t *macAddress)
+void Nl80211Base::AddInterfaceToList(uint32_t phyId, const char *interfaceName,
+		int macLength, const uint8_t *macAddress, uint32_t interfaceType)
 {
-	string s("Nl80211: AddInterface [");
-	s += interfaceName;
-	s += "]";
-	LogInfo(s);
-	OneInterface *pI = new OneInterface(phyId, interfaceName, macAddress, macLength);
+	OneInterface *pI = new OneInterface(phyId, interfaceName, macAddress, macLength, interfaceType);
 	m_interfaces.push_back(pI);
 }
 
@@ -313,66 +312,4 @@ bool Nl80211Base::SendAndFreeMessage()
 	}
 	return FreeMessage();
 }
-/***
- struct nl_sock *nls;
-        int nl80211_id;
-    } wifi;
 
-    wifi.nls = nl_socket_alloc();
-    if (!wifi.nls) {
-        fprintf(stderr, "Failed to allocate netlink socket.\n");
-        return EXIT_FAILURE;
-    }
-
-    int ret = EXIT_SUCCESS;
-
-    nl_socket_set_buffer_size(wifi.nls, 8192, 8192);
-
-    if (genl_connect(wifi.nls)) {
-        fprintf(stderr, "Failed to connect to generic netlink.\n");
-        ret = EXIT_FAILURE;
-        goto out_connect;
-    }
-
-    wifi.nl80211_id = genl_ctrl_resolve(wifi.nls, "nl80211");
-    if (wifi.nl80211_id < 0) {
-        fprintf(stderr, "nl80211 not found.\n");
-        ret = EXIT_FAILURE;
-        goto out_connect;
-    }
-
-    struct nl_msg *msg = nlmsg_alloc();
-    if (!msg) {
-        fprintf(stderr, "Failed to allocate netlink message.\n");
-        ret = EXIT_FAILURE;
-        goto out_connect;
-    }
-
-    struct nl_cb *cb = nl_cb_alloc(NL_CB_DEFAULT);
-    if (!cb) {
-        fprintf(stderr, "Failed to allocate netlink callback.\n");
-        ret = EXIT_FAILURE;
-        goto out_alloc;
-    }
-
-    nl_cb_set(cb, NL_CB_VALID, NL_CB_CUSTOM, list_interface_handler, NULL);
-
-    genlmsg_put(msg, 0, 0, wifi.nl80211_id, 0,
-            NLM_F_DUMP, NL80211_CMD_GET_INTERFACE, 0);
-
-    nl_send_auto_complete(wifi.nls, msg);
-
-    int err = 1;
-
-    nl_cb_set(cb, NL_CB_FINISH, NL_CB_CUSTOM, finish_handler, &err);
-
-    while (err > 0)
-        nl_recvmsgs(wifi.nls, cb);
-
-    nl_cb_put(cb);
-
-out_alloc:
-    nlmsg_free(msg);
-out_connect:
-nl_socket_free(wifi.nls);
-****/
