@@ -235,8 +235,14 @@ bool SetupInterfaces(IfIoctls *ifIoctls, InterfaceManagerNl80211 *im)
 	cout <<
 		"+=======================================================+" << endl;
 	bool shutdown = false;
+	bool reloadInterfaces = false;
 	do
 	{
+		if (reloadInterfaces)
+		{
+			im->GetInterfaceList();
+			reloadInterfaces = false;
+		}
 		cout << "INFO: ================= Interfaces: =================" << endl;
 		im->LogInterfaceList("Interfaces found:");
 
@@ -260,15 +266,19 @@ bool SetupInterfaces(IfIoctls *ifIoctls, InterfaceManagerNl80211 *im)
 				break;
 			case '2':  // Add Interface
 				AddAnInterface(im);
+				reloadInterfaces = true;
 				break;
 			case '3':  // Set Iface Mode
 				SetAnInterfacesMode(im);
+				reloadInterfaces = true;
 				break;
 			case '4':  // Iface UP
 				BringIfaceUpOrDown(ifIoctls, true);
+				reloadInterfaces = true;
 				break;
 			case '5':  // Iface DOWN
 				BringIfaceUpOrDown(ifIoctls, false);
+				reloadInterfaces = true;
 				break;
 			case '6':  // Set Power Save OFF.
 				SetPowerSaveOff(ifIoctls);

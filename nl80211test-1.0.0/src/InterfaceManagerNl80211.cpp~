@@ -75,6 +75,7 @@ bool InterfaceManagerNl80211::Init()
 	}
 	// Set Power Management to OFF for all Wi-Fi interfaces.
 	// (See dire warnings all around for what happens if we don't.)
+	// If an Interface is already UP, then this fails.
 	for (OneInterface* i : m_interfaces)
 	{
 		if (!m_ifIoctls.SetWirelessPowerSaveOff(i->name))
@@ -111,7 +112,11 @@ bool InterfaceManagerNl80211::Init()
 	// This will be the monitor/survey interface name:
 	oneIface = m_notTiInterfaces[0];
 	strncpy(m_monName, oneIface->name, SHX_IFNAMESIZE);
-	cout << "AP INTERFACE NAME: [" << m_apName << "], MONITOR INTERFACE NAME: [" << m_monName << "]" << endl;
+	LogInfo("InterfaceManager::Init() Complete, success. Results:");
+	stringstream s;
+	s << "AP interface name: [" << m_apName << "], Monitor interface name: [" << m_monName << "]";
+	LogInfo(s);
+	
 	return true;
 }
 

@@ -75,6 +75,9 @@ bool InterfaceManagerNl80211::Init()
 	}
 	// Set Power Management to OFF for all Wi-Fi interfaces.
 	// (See dire warnings all around for what happens if we don't.)
+	// If an Interface is already UP, then this fails.
+	// LATER: Changes to kernel setup (Power Mgmt disabled)
+	//   make this not as important.
 	for (OneInterface* i : m_interfaces)
 	{
 		if (!m_ifIoctls.SetWirelessPowerSaveOff(i->name))
