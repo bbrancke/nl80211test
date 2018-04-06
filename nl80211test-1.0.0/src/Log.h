@@ -7,7 +7,7 @@
 #include <string>
 #include <sstream>
 
-#include "TestColor.h"
+#include "TextColor.h"
 
 #define AT "at..."
 
