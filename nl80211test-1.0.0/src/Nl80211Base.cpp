@@ -297,6 +297,7 @@ bool Nl80211Base::SendAndFreeMessage()
 		FreeMessage();
 		return false;
 	}
+/**** aircrack-ng does NOT wait for ACK between channel change:	
 	// Wait for ACK from nl80211:
 	rv = nl_wait_for_ack(m_sock);  // 0: Succcess, <0: Error (w/errno)
 	if (rv < 0)
@@ -310,6 +311,7 @@ bool Nl80211Base::SendAndFreeMessage()
 		FreeMessage();
 		return false;
 	}
+****/
 	return FreeMessage();
 }
 
