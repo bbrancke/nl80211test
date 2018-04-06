@@ -38,7 +38,7 @@ public:
 	void LogInterfaceList(const char *caller);
 //protected:  Allow main() to interactively use all of these TODO: restore "protected"
 //	bool GetInterfaceList();
-	bool SetInterfaceType(const char *interfaceName, InterfaceType itype);
+	bool SetInterfaceMode(const char *interfaceName, InterfaceType itype);
 	bool CreateApInterface(const char *newInterfaceName, uint32_t phyId);
 	bool CreateStationInterface(const char *newInterfaceName, uint32_t phyId);
 	bool CreateMonitorInterface(const char *newInterfaceName, uint32_t phyId);

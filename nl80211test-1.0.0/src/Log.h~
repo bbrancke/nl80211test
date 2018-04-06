@@ -7,8 +7,6 @@
 #include <string>
 #include <sstream>
 
-#include "TestColor.h"
-
 #define AT "at..."
 
 using namespace std;

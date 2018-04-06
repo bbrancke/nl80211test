@@ -68,34 +68,34 @@ void Nl80211InterfaceAdmin::IfTypeToString(uint32_t iftype, string& strType)
 	switch (type)
 	{
 		case nl80211_iftype::NL80211_IFTYPE_UNSPECIFIED:
-			strType = "Unspecified ";
+			s << TEXT_RED << "Unspecified " << TEXT_NORMAL;
 			break;
 		case nl80211_iftype::NL80211_IFTYPE_ADHOC:
-			strType = "Ad Hoc      ";
+			s << TEXT_MAGENTA << "Ad Hoc      " << TEXT_NORMAL;
 			break;
 		case nl80211_iftype::NL80211_IFTYPE_STATION:
-			strType = "Station     ";
+			s << "Station     ";
 			break;
 		case nl80211_iftype::NL80211_IFTYPE_AP:
-			strType = "Access Point";
+			s << TEXT_WHITE << "Access Point" << TEXT_NORMAL;
 			break;
 		case nl80211_iftype::NL80211_IFTYPE_AP_VLAN:
-			strType = "AP VLAN     ";
+			s << TEXT_MAGENTA << "AP VLAN     " << TEXT_NORMAL;
 			break;
 		case nl80211_iftype::NL80211_IFTYPE_WDS:
-			strType = "WDS         ";
+			s << TEXT_MAGENTA << "WDS         " << TEXT_NORMAL;
 			break;
 		case nl80211_iftype::NL80211_IFTYPE_MONITOR:
-			strType = "Monitor     ";
+			s << TEXT_YELLOW << "Monitor     " << TEXT_NORMAL;
 			break;
 		case nl80211_iftype::NL80211_IFTYPE_MESH_POINT:
-			strType = "Mesh Point  ";
+			s << TEXT_MAGENTA << "Mesh Point  " << TEXT_NORMAL;
 			break;
 		default:
-			s << "Unknown (" << iftype << ")";
-			strType = s.str();
+			s << TEXT_RED << "Unknown (" << iftype << ")" << TEXT_NORMAL;
 			break;
 	}
+	strType = s.str();
 }
 
 void Nl80211InterfaceAdmin::LogInterfaceList(const char *caller)

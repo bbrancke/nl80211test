@@ -175,10 +175,10 @@ bool Nl80211InterfaceAdmin::SetInterfaceMode(const char *interfaceName, Interfac
 		case InterfaceType::Station:
 			type = NL80211_IFTYPE_STATION;
 			break;
-		case InterfaceType::Ap;
+		case InterfaceType::Ap:
 			type = NL80211_IFTYPE_AP;
 			break;
-		case InterfaceType:Monitor:
+		case InterfaceType::Monitor:
 			type = NL80211_IFTYPE_MONITOR;
 			break;
 		default:

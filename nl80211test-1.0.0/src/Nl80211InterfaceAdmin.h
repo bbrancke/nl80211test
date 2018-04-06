@@ -20,6 +20,7 @@
 #include "IfIoctls.h"
 #include "Log.h"
 #include "Nl80211Base.h"
+#include "TextColor.h"
 
 using namespace std;
 
