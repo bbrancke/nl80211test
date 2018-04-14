@@ -54,7 +54,9 @@ public:
 private:
 	InterfaceManagerNl80211();  // Private so that ctor can't be called
 	static InterfaceManagerNl80211* m_pInstance;
-	const uint8_t m_TiChipsetOui[3] = { 0xD0, 0xB5, 0xC2 };
+	// Originally was m_TiChipsetOui (D0-B5-C2) but I wanted it to be
+	// more generic for different boards, now is m_builtinWifiChipOui:
+	const uint8_t m_builtinWifiChipOui[3] = { 0xac, 0x83, 0xf3 };
 	// It appears "ap0" is RESERVED, you can create a new ap0 but
 	// BringUp() says "Interface name not unique"
 	// No that is not it. sta0 comes up fine as a STA; wlan0 is a STA
@@ -70,8 +72,8 @@ private:
 	bool CategorizeInterfaceList();
 	bool GetInterfaceByPhyAndName(uint32_t phyId, const char *name,
 		OneInterface **iface);
-	vector<OneInterface *> m_tiInterfaces;
-	vector<OneInterface *> m_notTiInterfaces;
+	vector<OneInterface *> m_builtinInterfaces;
+	vector<OneInterface *> m_externalInterfaces;
 };
 
 

@@ -76,6 +76,7 @@ using namespace chrono;
 #include "Terminator.h"
 #include "HostapdManager.h"
 #include "ChannelSetterNl80211.h"
+#include "TextColor.h"
 
 void wait(const char *msg)
 {
@@ -85,15 +86,17 @@ void wait(const char *msg)
 
 void ShowResult(const char *who, bool rv)
 {
+	cout << endl << endl;
 	cout << "main(): " << who << ":" << endl;
 	if (rv)
 	{
-		cout << "Success." << endl;
+		_GREEN("******** Success. ********");   
 	}
 	else
 	{
-		cout << "FAILED!" << endl;
+		_RED("****************** FAILED! ******************");
 	}
+	cout << endl << endl;
 }
 
 void AddAnInterface(InterfaceManagerNl80211 *im)
@@ -164,7 +167,18 @@ void BringIfaceUpOrDown(IfIoctls *ifIoctls, bool up)
 	{
 		rv = ifIoctls->BringInterfaceDown(in.c_str());
 	}
-	ShowResult("Interface UP/DOWN", rv);
+	string s("Interface [");
+	s += in;
+	s += "]: ";
+	if (up)
+	{
+		s += "UP";
+	}
+	else
+	{
+		s += "DOWN";
+	}
+	ShowResult(s.c_str(), rv);
 }
 
 void SetPowerSaveOff(IfIoctls *ifIoctls)
@@ -368,7 +382,8 @@ int ChannelChangeTest()
 	
 	getline(cin, in);
 
-	rv = cs.OpenConnection2();
+	//rv = cs.OpenConnection2();
+  rv = cs.OpenConnection(); 
 	ShowResult("ChannelSetter Open()", rv);
 	if (!rv)
 	{
@@ -380,7 +395,8 @@ int ChannelChangeTest()
 		cout << endl << "Setting to chan: " << chan << "..." << endl;
 		//auto startTime = system_clock::now();
 		time_point<system_clock>startTime = system_clock::now();
-		rv = cs.SetChannel2(chan);
+		// rv = cs.SetChannel2(chan);
+    rv = cs.SetChannel(chan);
 		if (!rv)
 		{
 			cout << "SetChannel() failed... Channel Change Test aborted." << endl << endl;
@@ -401,7 +417,8 @@ int ChannelChangeTest()
 		 	"   Duration: " << seconds << "." << mstot << " seconds, sleep(4)..." << endl;
 		this_thread::sleep_for(milliseconds(4000));
 	}
-	cs.CloseConnection2();
+	// cs.CloseConnection2();
+  cs.CloseConnection();
 	cout << "Channel Change Test complete..." << endl << endl;
 	return false;
 }
@@ -414,6 +431,7 @@ int main(int argc, char* argv[])
 	HostapdManager apMgr;
 	//   IInterfaceManager im;  <== A ptr in real use,
 	//   this is a Singleton class; main instantiates
+	_YELLOW("main(): **MUST** run this program as root (sudo)!");
 	InterfaceManagerNl80211 *im = InterfaceManagerNl80211::GetInstance();
 	cout << "main(): calling Init()..." << endl;
 	// Init() gets all current Wi-Fi interfaces into a list for us.

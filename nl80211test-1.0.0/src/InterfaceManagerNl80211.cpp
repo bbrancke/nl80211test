@@ -88,31 +88,32 @@ bool InterfaceManagerNl80211::Init()
 			LogErr(AT, s);
 		}
 	}
-	// Fills m_tiInterfaces and m_notTiInterfaces (vectors)
+	// Fills m_builtinInterfaces and m_externalInterfaces (vectors)
 	// These lists will be invalid once we add / change Interfaces...
 	if (!CategorizeInterfaceList())
 	{
 		// FATAL, no TI chipset detected.
 		LogErr(AT, "Init(): FATAL: No TI phy found, reboot required.");
+		LogInterfaceList("Interfaces Detected");
 		return false;
 	}
 	// Each Device should have only ONE Virtual Interface (VIF) at startup:
 	// FOR NOW, require reboot if > 1 of either...
-	if (m_tiInterfaces.size() != 1)
+	if (m_builtinInterfaces.size() != 1)
 	{
 		LogErr(AT, "Number of TI VIFs is not one, reboot required.");
 		return false;
 	}
-	if (m_notTiInterfaces.size() != 1)
+	if (m_externalInterfaces.size() != 1)
 	{
 		LogErr(AT, "Number of USB radio VIFs is not one, reboot required.");
-		return false;
+//		return false;
 	}
 	// This will be the Hostapd ap's interface name:
-	OneInterface *oneIface = m_tiInterfaces[0];
+	OneInterface *oneIface = m_builtinInterfaces[0];
 	strncpy(m_apName, oneIface->name, SHX_IFNAMESIZE);
 	// This will be the monitor/survey interface name:
-	oneIface = m_notTiInterfaces[0];
+	oneIface = m_externalInterfaces[0];
 	strncpy(m_monName, oneIface->name, SHX_IFNAMESIZE);
 	LogInfo("InterfaceManager::Init() Complete, success. Results:");
 	stringstream s;
@@ -126,7 +127,7 @@ bool InterfaceManagerNl80211::Init()
 //   "wlan0" interface info and "wlan1" interface info, and
 //   this will return a single interface: "wlan0" most of the time
 //   (but might be *"wlan1"*).
-// Fills m_tiInterfaces and m_notTiInterfaces (type: vector<OneInterface *>)
+// Fills m_builtinInterfaces and m_externalInterfaces (type: vector<OneInterface *>)
 bool InterfaceManagerNl80211::CategorizeInterfaceList()
 {
 	bool found = false;
@@ -134,15 +135,16 @@ bool InterfaceManagerNl80211::CategorizeInterfaceList()
 	{
 		// TI chip's MAC addres all start with these 3 bytes (the "OUI"):
 		//     TiChipsetOui[3] = { 0xD0, 0xB5, 0xC2 };  // D0-B5-C2
+		// (new: now using generic "m_builtinWifiChipOui, is ac-83-f3)
 		// We keep the OUI when randomizing the new interface's MACs.
-		if (memcmp(m_TiChipsetOui, i->mac, 3) == 0)
+		if (memcmp(m_builtinWifiChipOui, i->mac, 3) == 0)
 		{
 			found = true;
-			m_tiInterfaces.push_back(i);
+			m_builtinInterfaces.push_back(i);
 		}
 		else
 		{
-			m_notTiInterfaces.push_back(i);
+			m_externalInterfaces.push_back(i);
 		}
 	}
 	return found;
@@ -282,15 +284,15 @@ LogInterfaceList("CreateInterfaces Entry");
 	// of "D0-B5-C2"
 	// If ShadowX is restarted, we longer have "wlan0" but should have
 	// "sta0" and "ap0" whose MAC addresses begin with D0-B5-C2.
-	
-	oneIface = m_tiInterfaces[0];
+	// (for TI chips, now is "builtinWifiChipOui" - more general)
+	oneIface = m_builtinInterfaces[0];
 	phyId = oneIface->phy;
 
 	// Frank thinks that ALL the TI chips will have the SAME MAC address
 	// across all ShadowX devices, so randomize the AP and STA interface
 	// MAC addresses:
 	uint8_t mac[6];
-	memcpy(mac, m_TiChipsetOui, 3);
+	memcpy(mac, m_builtinWifiChipOui, 3);
 	mac[3] = rand() % 256;
 	mac[4] = rand() % 256;
 	mac[5] = rand() % 256;

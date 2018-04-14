@@ -17,6 +17,7 @@ int Nl80211Base::list_interface_handler(struct nl_msg *msg, void *arg)
 	int len;
 	uint32_t phyId;
 	uint32_t interfaceType;
+  uint32_t freq;
 	const char *interfaceName;
 	const uint8_t *macAddress;
 
@@ -27,6 +28,59 @@ int Nl80211Base::list_interface_handler(struct nl_msg *msg, void *arg)
 	// Parse 'msg' into the 'tb_msg' array:
 	nla_parse(tb_msg, NL80211_ATTR_MAX, genlmsg_attrdata(gnlh, 0), genlmsg_attrlen(gnlh, 0), NULL);
 	// Need these values to fill a new OneInterface:
+	// One (or more) of these are not present in one interface on NeoPLUS
+	// device. Missing was Interface name, the built-in interface has TWO
+	// interfaces, ae:83:f3:47:42:a8 and ac:83:f3:47:42:a8 (*ae* vs *ac*)
+	// Only the "ac" one was active; the ae one did not have Interface Name.
+	// IGNORE if no Interface name, we can't do anything with it
+	// (ifconfig [name] UP??) - there's no name!
+	if (!tb_msg[NL80211_ATTR_IFNAME])
+	{
+		return NL_SKIP;
+	}
+	interfaceName = nla_get_string(tb_msg[NL80211_ATTR_IFNAME]);
+
+	if (tb_msg[NL80211_ATTR_WIPHY])
+	{
+		phyId = nla_get_u32(tb_msg[NL80211_ATTR_WIPHY]);
+	}
+	else
+	{
+		instance->LogInfo("Interface missing attribute: PHY ID");
+		phyId = 0;
+	}
+	if (tb_msg[NL80211_ATTR_MAC])
+	{
+		len = nla_len(tb_msg[NL80211_ATTR_MAC]);
+		macAddress = (uint8_t *)nla_data(tb_msg[NL80211_ATTR_MAC]);
+	}
+	else
+	{
+		instance->LogInfo("Interface missing attribute: MAC address");
+		len = 6;
+		macAddress = (uint8_t *)"\x00\x00\x00\x00\x00\x00";
+	}
+	if (tb_msg[NL80211_ATTR_IFTYPE])
+	{
+		interfaceType = nla_get_u32(tb_msg[NL80211_ATTR_IFTYPE]);
+	}
+	else
+	{
+		instance->LogInfo("Interface missing attribute: Interface type");
+		interfaceType = 0;
+	}
+  if (tb_msg[NL80211_ATTR_WIPHY_FREQ])
+  {
+     freq = nla_get_u32(tb_msg[NL80211_ATTR_WIPHY_FREQ]);
+  }
+  else
+  {
+    instance->LogInfo("Interface FREQ attr missing");
+    freq = 0;
+  }
+	instance->AddInterfaceToList(phyId, interfaceName, len, macAddress, interfaceType, freq);
+
+/******
 	if (tb_msg[NL80211_ATTR_IFNAME]
 		&& tb_msg[NL80211_ATTR_WIPHY]
 		&& tb_msg[NL80211_ATTR_MAC]
@@ -43,6 +97,7 @@ int Nl80211Base::list_interface_handler(struct nl_msg *msg, void *arg)
 	{
 		instance->LogInfo("Nl80211: GET_INTERFACEs callback; MISSING iface param!");
 	}
+*****/
 	return NL_SKIP;
 }
 
@@ -96,9 +151,10 @@ void Nl80211Base::ClearInterfaceList()
 }
 
 void Nl80211Base::AddInterfaceToList(uint32_t phyId, const char *interfaceName,
-		int macLength, const uint8_t *macAddress, uint32_t interfaceType)
+		int macLength, const uint8_t *macAddress, uint32_t interfaceType, uint32_t frequency)
 {
-	OneInterface *pI = new OneInterface(phyId, interfaceName, macAddress, macLength, interfaceType);
+	OneInterface *pI = new OneInterface(phyId, interfaceName, macAddress, 
+    macLength, interfaceType, frequency);
 	m_interfaces.push_back(pI);
 }
 
@@ -279,7 +335,7 @@ bool Nl80211Base::SendWithRepeatingResponses()
 // SetChannel() and Create[/Delete]VirtualInterface() will
 //   call this method to Send m_msg to nl80211,
 //   checks for error returned from nl80211.
-bool Nl80211Base::SendAndFreeMessage()
+bool Nl80211Base::SendAndFreeMessage(bool waitForAck)
 {
 	int rv;
 	// "nl_send_auto_complete: DEPRECATED, please use nl_send_auto()"
@@ -297,21 +353,27 @@ bool Nl80211Base::SendAndFreeMessage()
 		FreeMessage();
 		return false;
 	}
-/**** aircrack-ng does NOT wait for ACK between channel change:	
-	// Wait for ACK from nl80211:
-	rv = nl_wait_for_ack(m_sock);  // 0: Succcess, <0: Error (w/errno)
-	if (rv < 0)
+// aircrack-ng does NOT wait for ACK between channel change.
+// but rv is always > 0, even though the call FAILS.
+// It is sufficient to check wait_for_ack's ret val, so...
+// Added 'waitForAck' param..
+	if (waitForAck)
 	{
-		rv = 0 - rv;  // ==> positive error #.
-		// e.g. Unknown Interface name (EINVAL); multitude of possibilities...
-		stringstream s;
-		s << "Nl80211Base::SendAndFreeMessage: wait_for_ack returned ERROR: ";
-		s << strerror(rv);
-		LogErr(AT, s);
-		FreeMessage();
-		return false;
+		// Wait for ACK from nl80211:
+		rv = nl_wait_for_ack(m_sock);  // 0: Succcess, <0: Error (w/errno)
+		if (rv < 0)
+		{
+			rv = 0 - rv;  // ==> positive error #.
+			// e.g. Unknown Interface name (EINVAL); multitude of possibilities...
+			stringstream s;
+			s << "Nl80211Base::SendAndFreeMessage: wait_for_ack returned ERROR: ";
+			s << strerror(rv);
+			LogErr(AT, s);
+			FreeMessage();
+			return false;
+		}
 	}
-****/
+
 	return FreeMessage();
 }
 

@@ -41,6 +41,7 @@ public:
 	bool SetIpAddressAndNetmask(const char *ifaceName, const char *ipAddress, const char *netmask);
 	bool SetMacAddress(const char *ifaceName, const uint8_t *mac, bool isMonitorMode);
 	bool SetWirelessPowerSaveOff(const char *ifaceName);
+	bool GetFrequency(const char *ifaceName, int32_t& Mantissa, int16_t& Exponent);
 private:
 	bool GetFlags(const char *interfaceName, int& flags);
 	bool SetFlags(const char *interfaceName, int flags);

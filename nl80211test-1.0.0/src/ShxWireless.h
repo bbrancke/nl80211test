@@ -33,6 +33,7 @@
 //   "real" value.
 #define SHX_SIOCSIWPOWER	0x8B2C		// Set Power Management settings
 #define SHX_SIOCGIWPOWER	0x8B2D		// Get Power Management settings
+#define SHX_SIOCGIWFREQ   0x8B05
 
 // For SetWirelessPowerSaveOff(), we need to set wrq.u.power.disabled = 1;
 // 'u' is type iwreq_data, is a union of approx 5,000,000 structs.
@@ -61,6 +62,13 @@ struct shx_iw_param
 	uint16_t flags;    // Various specific flags (in any).
 };
 
+struct shx_iw_freq
+{
+  int32_t m;  // Mantissa
+  int16_t e;  // exponent
+  uint8_t i;  // list index (when in range struct)
+  uint8_t flags;  // fixed/auto
+};
 // This is ShadowX's (stripped-down) version of 'iwreq_data':
 //   Currently we only need the 'power' struct
 // This is wireless.h's "union iwreq_data"
@@ -77,6 +85,7 @@ union shx_iwreq_data
 	// ... etc etc etc ...
 	// Here is the only one we currently need, it is 'struct iw_param' in wireless.h:
 	struct shx_iw_param	power;		/* PM duration/timeout */
+ struct shx_iw_freq freq;  // freq ( >1000) or channel ( < 1000)
 };
 
 
