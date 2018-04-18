@@ -14,7 +14,6 @@
 #include "Log.h"
 #include "Nl80211Base.h"
 #include "InterfaceManagerNl80211.h"
-#include "IChannelSetter.h"
 
 using namespace std;
 
@@ -41,10 +40,7 @@ public:
 private:
 	uint32_t ChannelToFrequency(uint32_t channel);
 	uint32_t m_interfaceIndex;
-	
-	
 	struct nl80211_state m_state;
 };
 
 #endif  // CHANNELSETTERNL80211_H_
-
