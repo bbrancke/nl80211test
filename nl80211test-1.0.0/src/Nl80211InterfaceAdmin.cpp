@@ -109,7 +109,7 @@ void Nl80211InterfaceAdmin::LogInterfaceList(const char *caller)
 	s2 << "Interface List has " << m_interfaces.size() << " elements:";
 	LogInfo(s2);
 
-	LogInfo("#\tName:\tPhy\tType        \tMAC");
+	LogInfo("#\tName:\tPhy\tType        \tMAC            \tFreq");
 	j = 0;
 	for (OneInterface *i : m_interfaces)
 	{
@@ -120,9 +120,19 @@ void Nl80211InterfaceAdmin::LogInterfaceList(const char *caller)
 		sprintf(buf, "%02x:%02x:%02x:%02x:%02x:%02x",
 			p[0], p[1], p[2], p[3], p[4], p[5]);
 		IfTypeToString(i->iftype, strIftype);
-		
+/*** TODO: Frequency SIOCGIFFREQ ALWAYS returns Invalid argument
+** something about IFACE has to be UP and CONNECTED or some such.
+		int32_t mantissa = 0;
+    int16_t exponent = 0;
+    ifIoctls.GetFrequency(i->name, mantissa, exponent);
+	
 		info << j << "\t" << i->name << "\t" << i->phy
-			<< "\t" << strIftype << "\t" << buf << "\t";
+			<< "\t" << strIftype << "\t" << buf << "\t" <<
+      i->freq << "\t" << "M: " << mantissa << ", E: " << exponent << "\t";
+*****/
+		info << j << "\t" << i->name << "\t" << i->phy
+			<< "\t" << strIftype << "\t" << buf << "\t" <<
+      i->freq << "\t";
 		int flags;
 		bool isUp;
 		bool isRunning;
@@ -208,7 +218,7 @@ bool Nl80211InterfaceAdmin::SetInterfaceMode(const char *interfaceName, Interfac
 		return false;
 	}
 
-	if (!SendAndFreeMessage())
+	if (!SendAndFreeMessage(true))
 	{
 		Close();
 		// Detailed error already logged...
@@ -218,6 +228,7 @@ bool Nl80211InterfaceAdmin::SetInterfaceMode(const char *interfaceName, Interfac
 
 	Close();
 	LogInfo("SetInterfaceType() complete, success");
+	return true;
 }
 
 // _createInterface(): private:
@@ -253,7 +264,7 @@ bool Nl80211InterfaceAdmin::_createInterface(const char *newInterfaceName,
 		return false;
 	}
 
-	if (!SendAndFreeMessage())
+	if (!SendAndFreeMessage(true))
 	{
 		Close();
 		// Detailed error already logged...
@@ -335,7 +346,7 @@ bool Nl80211InterfaceAdmin::DeleteInterface(const char *interfaceName)
 		return false;
 	}
 
-	if (!SendAndFreeMessage())
+	if (!SendAndFreeMessage(true))
 	{
 		Close();
 		// Detailed error already logged...

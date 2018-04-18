@@ -21,6 +21,7 @@ bool ChannelSetterNl80211::OpenConnection()
 	// Currently this ALWAYS "mon0" but this may change if re-creating
 	// a troubled iface name does not succeed.
 	interfaceName = im->GetMonitorInterfaceName();
+cout << "Channel Setter using interface: " << interfaceName << endl;
 	im->GetInterfaceIndex(interfaceName, m_interfaceIndex);
 	return true;
 }
@@ -73,7 +74,7 @@ See /usr/include/linux/nl80211.h
 		return false;
 	}
 
-	return SendAndFreeMessage();
+	return SendAndFreeMessage(false);
 }
 
 // This is how aircrack sets channel:

@@ -82,10 +82,11 @@ public:
 	// Call this when expecting multiple responses [e.g., GetInterfaceList()]:
 	bool SendWithRepeatingResponses();
 	// Send with no mult [e.g., SetChannel()]
-	bool SendAndFreeMessage();
+	bool SendAndFreeMessage(bool waitForAck);
 	void ClearInterfaceList();
 	void AddInterfaceToList(uint32_t phyId, const char *interfaceName,
-		int macLength, const uint8_t *macAddress, uint32_t interfaceType);
+		int macLength, const uint8_t *macAddress,
+    uint32_t interfaceType, uint32_t frequency);
 protected:
 	Nl80211Base() { }
 	vector<OneInterface *> m_interfaces;

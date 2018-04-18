@@ -233,3 +233,28 @@ bool IfIoctls::SetWirelessPowerSaveOff(const char *ifaceName)
 	return true;
 }
 
+bool IfIoctls::GetFrequency(const char *ifaceName,
+  int32_t& Mantissa, int16_t& Exponent)
+{
+  shx_iwreq wrq;
+
+	if (!Open())
+	{
+		return false;
+	}
+	memset(&wrq, 0, sizeof(shx_iwreq));
+  strncpy(wrq.ifr_name, ifaceName, sizeof(wrq.ifr_name));
+  if (ioctl(m_fd, SHX_SIOCGIWFREQ, &wrq) < 0)
+  {
+    int myErr = errno;
+    Close();
+    string s("GetFrequency: Can't SIOCGIWFREQ: ");
+    s += strerror(myErr);
+    LogErr(AT, s);
+    return false;
+  }
+  Mantissa = wrq.u.freq.m;
+  Exponent = wrq.u.freq.e;
+  return true;
+}
+
