@@ -25,10 +25,28 @@ InterfaceManagerNl80211* InterfaceManagerNl80211::GetInstance()
 //   Calls my Init().
 //   (does some other startup stuff...)
 //   Calls my CreateInterfaces()
-//   At this point, main() can start hostapd on the newly created "ap0" interface.
+// Update for NanoPi-NeoPlus2:
+//   The built-in Broadcom interface does NOT support
+//      Virtual Interfaces [VIF]s.
+//   The built-in interface appears to ALWAYS be wlan0.
+//   This still gets the Interface List from nl80211
+//      for HostapdManager to start the Access Point.
+//      We create a VIF to send emails via an outside AP
+//      it is usually auto-named wlx000e8e719b18; this
+//      saves that iface name for EmailSender to use
+//      when configured to send emails (egress) over AP.
+//      Ethernet port is always named eth0.
+//   After CreateInterfaces() is called, main() can
+//     use HostapdManager to start hostapd.
 // Init() gets the list of current Wifi interfaces. We must have exactly TWO "phy" ids,
-//   one is the built-in TI chip we use for the AP and the STA (for alert emails).
-//   The other phy Id is the Realtek USB that we use for Survey mode.
+//   one is the built-in chip we use for the AP.
+//   The other phy Id is the Ralink USB that we use for Survey mode.
+//   and the STA (for alert emails).
+// NOTE: Built in chipset does not support VIFs; neither does the new
+//   (80211ac) REALTEK USB chip that is proposes as a replacement for Ralink.
+//   Will have to see if there is an updated driver OR shutdown
+//   either the AP or Survey interface and reconfigure that one when
+//   it comes time to send alert emails via an Acess Point.
 // Init() returns false if:
 //     it can't get Interface List from nl80211 OR
 //     number of 'Phy's is not two.
@@ -51,8 +69,12 @@ bool InterfaceManagerNl80211::Init()
 		LogErr(AT, "InterfaceManagerNl80211::Init() can't get Interface List");
 		return false;
 	}
+LogInterfaceList("Init() interfaces found");
+	
 	// Create a vector<(uint32_t)PhyId> from m_interfaces.
-	// This should have a count of two when done, or return false (ERROR, # of physical devices NOT two).
+	// This should have a count of two when done,
+	// (means we have two physical devices)
+	// or return false (ERROR, # of physical devices NOT two).
 	vector<uint32_t>phys;
 	for (OneInterface* i : m_interfaces)
 	{
@@ -70,9 +92,15 @@ bool InterfaceManagerNl80211::Init()
 	{
 		stringstream ss;
 		ss << "InterfaceManagerNl80211::Init(): Found " << phys.size() << " physical devices, expect TWO.";
-		LogErr(AT, ss);
-		return false;
+		if (strictPhyCountCheck)
+		{
+			LogErr(AT, ss);
+			return false;
+		}
+		// (else... Is OK, for developing. Note it and try to continue
+		LogInfo(ss);
 	}
+	
 	// Set Power Management to OFF for all Wi-Fi interfaces.
 	// (See dire warnings all around for what happens if we don't.)
 	// If an Interface is already UP, then this fails.
@@ -80,6 +108,16 @@ bool InterfaceManagerNl80211::Init()
 	//   make this not as important.
 	for (OneInterface* i : m_interfaces)
 	{
+		// main() has killed any apps (wpa_supplicant, hostapd, etc.)
+		// Bring all the wireless interfaces DOWN. hostapd brings
+		// its interface up automatically in AP mode.
+		if (!m_ifIoctls.BringInterfaceDown(i->name))
+		{
+			string s("InterfaceManagerNl80211.Init(): BringIface DOWN(");
+			s += i->name;
+			s += ") failed, continuing anyway.";
+			LogErr(AT, s);
+		}
 		if (!m_ifIoctls.SetWirelessPowerSaveOff(i->name))
 		{
 			string s("InterfaceManagerNl80211.Init(): SetWirelessPowerSaveOff(");
@@ -92,35 +130,52 @@ bool InterfaceManagerNl80211::Init()
 	// These lists will be invalid once we add / change Interfaces...
 	if (!CategorizeInterfaceList())
 	{
-		// FATAL, no TI chipset detected.
-		LogErr(AT, "Init(): FATAL: No TI phy found, reboot required.");
-		LogInterfaceList("Interfaces Detected");
+		// FATAL, no built-in chipset detected.
+		LogErr(AT, "Init(): FATAL: No built-in phy found, reboot required.");
+		// LogInterfaceList("Interfaces Detected");  Already showed at top...
 		return false;
 	}
 	// Each Device should have only ONE Virtual Interface (VIF) at startup:
 	// FOR NOW, require reboot if > 1 of either...
-	if (m_builtinInterfaces.size() != 1)
+	// This guarantees we can use m_xxxInterfaces[0] below for monName and apName
+	bool retVal = true;
+	OneInterface *oneIface;
+	if (m_builtinInterfaces.size() == 1)
 	{
-		LogErr(AT, "Number of TI VIFs is not one, reboot required.");
-		return false;
+		// This will be the Hostapd ap's interface name:
+		oneIface = m_builtinInterfaces[0];
+		strncpy(m_apName, oneIface->name, SHX_IFNAMESIZE);
 	}
-	if (m_externalInterfaces.size() != 1)
+	else
+	{
+		LogErr(AT, "Number of Built-in VIFs is not one, reboot required.");
+		strcpy(m_apName, "UNK");
+		retVal = false;
+	}
+
+	if (m_externalInterfaces.size() == 1)
+	{
+		// This will be the monitor/survey interface name:
+		oneIface = m_externalInterfaces[0];
+		strncpy(m_monName, oneIface->name, SHX_IFNAMESIZE);
+	}
+	else
 	{
 		LogErr(AT, "Number of USB radio VIFs is not one, reboot required.");
-//		return false;
+		strcpy(m_monName, "UNK");
+		retVal = false;
 	}
-	// This will be the Hostapd ap's interface name:
-	OneInterface *oneIface = m_builtinInterfaces[0];
-	strncpy(m_apName, oneIface->name, SHX_IFNAMESIZE);
-	// This will be the monitor/survey interface name:
-	oneIface = m_externalInterfaces[0];
-	strncpy(m_monName, oneIface->name, SHX_IFNAMESIZE);
-	LogInfo("InterfaceManager::Init() Complete, success. Results:");
+
+	// CreateInterfaces() [below] creates the Virtual Interface [VIF]
+	// that we will use for sending alert emails when configured
+	// to use an external Access Point.
+	LogInfo("InterfaceManager::Init() Complete. Results:");
+
 	stringstream s;
 	s << "AP interface name: [" << m_apName << "], Monitor interface name: [" << m_monName << "]";
 	LogInfo(s);
 	
-	return true;
+	return retVal;
 }
 
 // Normally, m_interfaces has just two entries:
@@ -171,31 +226,47 @@ bool InterfaceManagerNl80211::GetInterfaceByPhyAndName(uint32_t phyId,
 // Entries (type: OneInterface *) in m_interfaces are:
 // OneInterface members: phy (uint32_t), name[IFNAMSIZE] (char), mac[6] (uint8_t)
 //    The device:		Name:	phy	mac
-//  Built-in TI chip	wlan0	0	D0:B5:C2:CB:90:CA
-//  Realtek USB radio	wlan1	1	EC:F0:0E:67:79:0A
+//  Built-in chip	  wlan0	0	  [TI: D0:B5:C2:CB:90:CA, Bcom(NeoPi): ac:83:f3:47:42:a8]
+//  Realtek USB radio	wlan1	1	EC:F0:0E:67:79:0A  -- or: -- 
+//  Ralink USB radio wlan1 1  00:0e:8e:71:9b:1f
 // If here, then Init() guaranteed we have two physical devices
 // I have seen name and phy reversed (Realtek came up BEFORE the TI chip)
 // and the name and phy can differ if something weird/bad happened before
 // ShadowX started (or was re-started).
 //
-// When this method completes, we will have:
-//	TI chip			apX		0	For hostapd --------+-- TWO Virtual
-//					staY	0	For wpa_supplicant -+-- Interfaces
-//													+-- on TI chip
-//	Realtek USB		monZ	1	For survey / pcap
-// Get Interface names from me -- MONITOR only!:
-// FOR NOW, X, Y and Z are all 0 (ap0, sta0, mon0)
-//   so we don't have to update hostapd.conf, wpa_supp.conf, etc.
-//   I *think* this will be OK. May change if can't recreate
-//     an interface name that prev. existed and had an error.
+// We need:
+//   The built-in Wi-Fi chipset for the ShadowX Access Point, and
+//   the USB radio to be in monitor mode for PCAP captures and
+//   a "Station" mode VIF for sending alert emails.
+// NanoPi-Neo Plus2:
+//  Built-in Wi-Fi will not handle second VIF
+//  so we add it to the USB radio (RALINK).
+//  Note that (current) Realtek 80211ac driver is great
+//  for monitoring but doesn't support a second VIF!
+//  There we have to get creative, such as closing down
+//  the AP, switching to STA mode, send emails and restart the AP.
+//  Or maybe by then the REALTEK driver
+//    will be updated to properly handle VIFs.
+
+// HostApdManager, WpaSuppManager, EmailSender, Survey/DF monitor mode:
+// ALL MUST GET Interface names from me.
 //
 // IMPORTANT:
 // 1:
 // main() has a Terminator class and should ensure that hostapd (and
 // wpa_supplicant*) are not running; main() should start hostapd
-// AFTER this method creates interfaces. (*-wpa_supplicant is run
+// AFTER this method creates interfaces. [*-wpa_supplicant is run
 // only when sending alert emails, and is started and stopped by
-// the email manager).
+// the email manager, that should use WpaSupplicantManager, which
+// in turn calls my 'GetWpaSupplicantIfaceName()'].
+
+// LATER: I don't think #2 happens on the new NEO PLUS2 platform
+//   but keeping this in case we see ever see this again.
+//   *** I think it is still a good idea to turn power save mode OFF
+//   *** on all interfaces, and always keep at least one in the list.
+// *** NeoPlus2: We use the assigned power-up names and just create
+//     ONE new STA interface on the USB radio's PHY ID.
+// You can skip reading #2 if you don't have weird firmware load errors.
 // 2:
 // Original attempt did:
 //   Action:									STATUS:
@@ -278,240 +349,108 @@ bool InterfaceManagerNl80211::CreateInterfaces()
 	uint32_t phyId;
 // For debug, show InterfaceList:
 LogInterfaceList("CreateInterfaces Entry");
-
-	// Get list of Interfaces now using the TI chip:
-	// Need the phy ID for the TI chip, look for OUI (first 3 bytes)
-	// of "D0-B5-C2"
-	// If ShadowX is restarted, we longer have "wlan0" but should have
-	// "sta0" and "ap0" whose MAC addresses begin with D0-B5-C2.
-	// (for TI chips, now is "builtinWifiChipOui" - more general)
-	oneIface = m_builtinInterfaces[0];
-	phyId = oneIface->phy;
-
-	// Frank thinks that ALL the TI chips will have the SAME MAC address
-	// across all ShadowX devices, so randomize the AP and STA interface
-	// MAC addresses:
-	uint8_t mac[6];
-	memcpy(mac, m_builtinWifiChipOui, 3);
-	mac[3] = rand() % 256;
-	mac[4] = rand() % 256;
-	mac[5] = rand() % 256;
-
-	// Create and bring up 'sta0' interface first on the TI-phy.
-	// 'sta0' will send alert emails for us.
-	// Do we already have VIF "sta0"?
-	if (GetInterfaceByPhyAndName(phyId, m_staName, &oneIface))
-	{
-		LogInfo("CreateInterfaces(): sta0 already exists, not creating.");
-		// Exists, bring it down:
-		if (!m_ifIoctls.BringInterfaceDown("sta0"))
-		{
-			LogErr(AT, "CreateInterfaces(): Can't bring Interface sta0 down.");
-			return false;
-		}
-	}
-	else
-	{
-		if (!CreateStationInterface(m_staName, phyId))
-		{
-			LogErr(AT, "CreateInterfaces(): Can't create Interface sta0!");
-			return false;
-		}
-		// A NEW interface starts out DOWN.
-	}
-	// Set Power Save OFF on all newly created interfaces.
-	// When here, the sta0 interface is created but not UP
-
-	// ALL NEWLY CREATED INTERFACED:
-	// Set Power Save Mode OFF before bringing the interface UP.
-
-	// This particular software version of the TI wl-18xx crashes badly when
-	// entering power save mode (power save is fractions of a second). When
-	// power returns it has thrown away something critical (can't remember
-	// at the moment) but the effect is that it brings the interface down,
-	// unrecoverable error.
-	// This is the programatic equiv of "iwconfig sta0 power off" --
-	//   disable Power Save Mode.
-	if (!m_ifIoctls.SetWirelessPowerSaveOff(m_staName))
-	{
-		LogErr(AT, "SetWirelessPowerSaveOff(sta0) failed, continuing anyway.");
-	}
-	else
-	{
-		LogInfo("Power Save Off on sta0.");
-	}
-
-	if (!m_ifIoctls.SetMacAddress(m_staName, mac, false))
-	{
-		LogErr(AT, "CreateInterfaces(): Can't set Interface sta0's MAC address, continuing...");
-	}
-	// Bring UP the interface:
-	if (!m_ifIoctls.BringInterfaceUp(m_staName))
-	{
-		LogErr(AT, "CreateInterfaces(): Can't bring Interface sta0 up.");
-		return false;
-	}
-	LogInfo("sta0 is created and UP.");
-
-	// Do the same thing for"ap0", this is for ShadowX's access point.
-	// Creating as AP is OK, but when BringIfaceUp("ap0") FAILS
-	//    "Interface name is not unique" what ever that means...
-	// m_apName is now "ap0"...
-	if (GetInterfaceByPhyAndName(phyId, m_apName, &oneIface))
-	{
-		LogInfo("CreateInterfaces(): (ap) already exists, not creating.");
-		if (!m_ifIoctls.BringInterfaceDown(m_apName))
-		{
-			LogErr(AT, "CreateInterfaces(): Can't bring Interface sta0 down.");
-			return false;
-		}
-	}
-	else
-	{
-		if (!CreateApInterface(m_apName, phyId))
-		{
-			LogErr(AT, "CreateInterfaces(): Can't create AP Interface ap0!");
-			// NL80211 connection is closed and cleaned up at this point.
-			return false;
-		}
-	}
-
-	if (!m_ifIoctls.SetWirelessPowerSaveOff(m_apName))
-	{
-		LogErr(AT, "SetWirelessPowerSaveOff(ap) failed, continuing anyway.");
-	}
-	else
-	{
-		LogInfo("Power Save Off on (ap).");
-	}
-
-	// MAC addresses *must* be unique or else we get:
-	//		# ifconfig sta0 up
-	//		ifconfig: SIOCSIFFLAGS: Name not unique on network
-	// so bump the final octet up one (or back to zero):
-	mac[5]++;
-	if (!m_ifIoctls.SetMacAddress(m_apName, mac, false))
-	{
-		LogErr(AT, "CreateInterfaces(): Can't set Interface (ap)'s MAC address, continuing...");
-	}
-	// Bring UP the ap0 interface:
-	if (!m_ifIoctls.BringInterfaceUp(m_apName))
-	{
-		LogErr(AT, "CreateInterfaces(): Can't bring ap Interface up.");
-		return false;
-	}
-
-	// Need to re-read InterfaceList here, it is no longer valid...
-	if (!GetInterfaceList())
-	{
-		LogErr(AT, "CreateInterfaces(): Can't re-read Interface List (1).");
-		return false;
-	}
-LogInterfaceList("CreateInterfaces: II");
-	// We should have ap0, sta0, wlan[0] on this PHY, and ap0 and sta0 are UP.
-	// The firmware should NOT unload when we remove interface 'wlan[0]'
-	// Somehow I remember (earlier) that it DOES indeed unload right here.
-	// Let us see if that is also fixed by the changes made...
+	// 4/18/2018. REMOVED RANDOMIZE MAC ADDRS, only create one new interface
+	// on the USB (Ralink) radio; use that new name (our choice for name is
+	// OVER-RIDDEN by the driver; we have to find the name once it is added).
+	// Look at the commit for 4/18/2018 to see how it used to create VIF
+	//   on the TI interface and randomized MAC addrs.
 	//
-	// Delete all interfaces associated with this phy Id
-	// EXCEPT sta0 and ap0:
-	//  Delete..() and Create...() are in Nl80211InterfaceAdmin class
-	//  and Open() / Close() the NL80211 connection for us automatically.
-	for (OneInterface* i : m_interfaces)
+	//
+	// NanoPi-Neo Plus2: create STA VIF on the ralink radio
+	// Init() has already conveniently broken all wireless interfaces
+	// in m_interfaces list into m_builtinInterfaces and m_externalInterfaces.
+	if (m_externalInterfaces.size() < 1)
 	{
-		if (i->phy == phyId &&
-			(strcmp(i->name, m_apName) != 0) &&
-			(strcmp(i->name, m_staName) != 0))
-		{
-			m_ifIoctls.BringInterfaceDown(i->name);
-			if (!DeleteInterface(i->name))
-			{
-				string s("CreateInterfaces(): Can't delete iface [");
-				s += i->name;
-				s += "], continuing...";
-				LogErr(AT, s);
-			}
-		}
+		strcpy(m_wpaName, "UNK");
+		LogErr(AT, "CreateInterfaces(): No USB radio detected, can't create wpa iface");
+		return false;
 	}
-
-	// --------------------------------------------------------
-	// Set up mon0 interface on the USB radio:
-	uint32_t tiPhy = phyId;
-	phyId = 1;
-	found = false;
-	// Get the OTHER Phy ID:
-	for (OneInterface* i : m_interfaces)
+	oneIface = m_externalInterfaces[0];
+	// Create new wpa supplicant interface on USB radio's phy:
+	phyId = oneIface->phy;
+	// Make a copy of the current Interface List:
+	// The driver ignores our proposed name for a new Virtual Interface
+	//   so we have to deduce what it assigned by re-reading interface list.
+	vector<string> origIfaces;
+	for (OneInterface *i : m_interfaces)
 	{
-		if (i->phy != tiPhy)
+		origIfaces.push_back(i->name);
+	}
+	if (!CreateStationInterface("wpa0", phyId))
+	{
+		LogErr(AT, "Couldn't create wpa_supplicant interface");
+		return false;
+	}
+	
+	// Re-get the interface list:
+	// It might take a fraction of a second or so for the new interface
+	// to notify everbody that it exists, so try a few times to see it.
+	found = false;
+	int i = 0;
+	do
+	{
+		if (!GetInterfaceList())
+		{
+			LogErr(AT, "CreateInterfaces(): Can't re-read Interface List (1).");
+			return false;
+		}
+		if (m_interfaces.size() != origIfaces.size())
 		{
 			found = true;
-			phyId = i->phy;
-			break;
 		}
-	}
-	if (!found)
-	{
-		LogErr(AT, "CreateInterfaces(): Can't find USB Phy ID, assuming phyId = 1");
-		// Continue anyway...
-	}
-
-	// Does mon0 already exist?
-	if (GetInterfaceByPhyAndName(phyId, "mon0", &oneIface))
-	{
-		LogInfo("CreateInterfaces(): mon0 already exists, leaving alone.");
-		if (!m_ifIoctls.BringInterfaceDown("mon0"))
+		else
 		{
-			LogErr(AT, "CreateInterfaces(): Can't bring Interface mon0 down.");
-			return false;
-		}
-	}
-	else
-	{
-		if (!CreateMonitorInterface("mon0", phyId))
-		{
-			LogErr(AT, "CreateInterfaces(): Can't create mon0 interface.");
-			return false;
-		}
-	}
-
-	if (!m_ifIoctls.SetWirelessPowerSaveOff("mon0"))
-	{
-		LogErr(AT, "SetWirelessPowerSaveOff(mon0) failed, continuing anyway.");
-	}
-	else
-	{
-		LogInfo("Power Save Off on mon0.");
-	}
-	if (!m_ifIoctls.BringInterfaceUp("mon0"))
-	{
-		LogErr(AT, "CreateInterfaces(): Can't bring mon0 up.");
-		return false;
-	}
-
-	// Delete interfaces that are NOT mon0:
-	for (OneInterface* i : m_interfaces)
-	{
-		if (i->phy == phyId &&
-			(strcmp(i->name, "mon0") != 0))
-		{
-			m_ifIoctls.BringInterfaceDown(i->name);
-			if (!DeleteInterface(i->name))
+			i++;
+			if (i > 20)
 			{
-				string s("CreateInterfaces(): Can't delete iface [");
-				s += i->name;
-				s += "], continuing...";
-				LogErr(AT, s);
+				// Five seconds and the new interface still doesn't exist!
+				LogErr(AT, "New STA interface has not appeared after 5 seconds.");
+				return false;
 			}
+			// Wait a little bit and re-try...
+			this_thread::sleep_for(milliseconds(250));
+		}
+	} while (!found);
+	LogInterfaceList("CreateInterfaces Part II");
+	// Find the new interface in m_interfaces list:
+	for (OneInterface *i : m_interfaces)
+	{
+		string name = i->name;
+		auto it = find(origIfaces.begin(), origIfaces.end(), name);
+		if (it == origIfaces.end())
+		{
+			// This interface is NEW...
+			// It is usually a weird name like "wlx000e8e719b18"
+			strncpy(m_wpaName, i->name, 16);
 		}
 	}
-
-	// Finally re-read the new interface list:
-	if (!GetInterfaceList())
+	string info("wpa_supplicant should use interface [");
+	info += m_wpaName;
+	info += "]";
+	LogInfo(info);
+	if (!m_ifIoctls.SetWirelessPowerSaveOff((const char *)m_wpaName))
 	{
-		LogErr(AT, "CreateInterfaces(): Can't re-read Interface List (2).");
+		LogErr(AT, "SetWirelessPowerSaveOff(wpa iface) failed, continuing anyway.");
+	}
+	else
+	{
+		LogInfo("Power Save Off on wpa iface.");
+	}
+	// Now we have:
+	//  - The wpa_supplicant interface set up (it is still down)
+	//     Its name is set
+	//     [WpaSupplicantManager will call my GetWpaSupplicantInterfaceName()]
+	//  - The hostapd interface name is set for HostApdManager
+	//  - The monitor interface name is set.
+	// Put the monitor interface into monitor mode, and we're done:
+	// bool SetInterfaceMode(const char *interfaceName, InterfaceType itype);
+	// itype: InterfaceType::Station, ::Ap, ::Monitor
+	if (!SetInterfaceMode((const char *)m_monName, InterfaceType::Monitor))
+	{
+		LogErr(AT, "Can't set mon interface to MONITOR mode");
 		return false;
 	}
-LogInterfaceList("CreateInterfaces: COMPLETE");
+	// We're not setting AP's MAC address or anything else FOR NOW.
 	return true;
 }
 
@@ -530,8 +469,8 @@ const char *InterfaceManagerNl80211::GetApInterfaceName()
 	return m_apName;
 }
 
-const char *InterfaceManagerNl80211::GetStaInterfaceName()
+const char *InterfaceManagerNl80211::GetWpaSupplicantInterfaceName()
 {
-	return m_staName;
+	return m_wpaName;
 }
 

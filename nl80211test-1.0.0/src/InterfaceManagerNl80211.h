@@ -9,6 +9,8 @@
 #include <sstream>
 #include <vector>
 #include <algorithm>
+#include <thread>
+#include <chrono>
 
 #include <cstring>
 #include <cstdlib>
@@ -30,6 +32,7 @@
 //  #include "IInterfaceManager.h"  no longer
 
 using namespace std;
+using namespace chrono;
 
 class InterfaceManagerNl80211 : public Nl80211InterfaceAdmin
 {
@@ -39,7 +42,7 @@ public:
 	InterfaceManagerNl80211(InterfaceManagerNl80211 const&) = delete;
 	InterfaceManagerNl80211& operator=(InterfaceManagerNl80211 const&) = delete;
 	// Init() and CreateInterfaces() are called by main() at startup, in order:
-	bool Init();
+	bool Init(bool strictPhyCountCheck);
 	bool CreateInterfaces();
 	// Next main() can start hostapd and begin surveys.
 	//
@@ -50,7 +53,7 @@ public:
 	//   LEAVE THE NAME THAT IT COMES UP AS ALONE!
 	const char *GetMonitorInterfaceName();
 	const char *GetApInterfaceName();
-	const char *GetStaInterfaceName();
+	const char *GetWpaSupplicantInterfaceName();
 private:
 	InterfaceManagerNl80211();  // Private so that ctor can't be called
 	static InterfaceManagerNl80211* m_pInstance;
@@ -66,7 +69,7 @@ private:
 	//   TODO: Shouldn't we have members for STATION VIF name and MON0 VIF name too?
 	// Was in the process of deleting this, but it does remove A LOT of "ap0"s from the code...
 	char m_apName[SHX_IFNAMESIZE];
-	const char *m_staName = "sta0";
+	char m_wpaName[SHX_IFNAMESIZE];
 	char m_monName[SHX_IFNAMESIZE];
 	IfIoctls m_ifIoctls;
 	bool CategorizeInterfaceList();

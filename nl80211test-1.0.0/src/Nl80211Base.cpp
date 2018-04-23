@@ -17,7 +17,7 @@ int Nl80211Base::list_interface_handler(struct nl_msg *msg, void *arg)
 	int len;
 	uint32_t phyId;
 	uint32_t interfaceType;
-  uint32_t freq;
+	uint32_t freq;
 	const char *interfaceName;
 	const uint8_t *macAddress;
 
@@ -69,35 +69,17 @@ int Nl80211Base::list_interface_handler(struct nl_msg *msg, void *arg)
 		instance->LogInfo("Interface missing attribute: Interface type");
 		interfaceType = 0;
 	}
-  if (tb_msg[NL80211_ATTR_WIPHY_FREQ])
-  {
-     freq = nla_get_u32(tb_msg[NL80211_ATTR_WIPHY_FREQ]);
-  }
-  else
-  {
-    instance->LogInfo("Interface FREQ attr missing");
-    freq = 0;
-  }
-	instance->AddInterfaceToList(phyId, interfaceName, len, macAddress, interfaceType, freq);
-
-/******
-	if (tb_msg[NL80211_ATTR_IFNAME]
-		&& tb_msg[NL80211_ATTR_WIPHY]
-		&& tb_msg[NL80211_ATTR_MAC]
-		&& tb_msg[NL80211_ATTR_IFTYPE])
+	if (tb_msg[NL80211_ATTR_WIPHY_FREQ])
 	{
-		phyId = nla_get_u32(tb_msg[NL80211_ATTR_WIPHY]);
-		interfaceType = nla_get_u32(tb_msg[NL80211_ATTR_IFTYPE]);
-		interfaceName = nla_get_string(tb_msg[NL80211_ATTR_IFNAME]);
-		len = nla_len(tb_msg[NL80211_ATTR_MAC]);
-		macAddress = (uint8_t *)nla_data(tb_msg[NL80211_ATTR_MAC]);
-		instance->AddInterfaceToList(phyId, interfaceName, len, macAddress, interfaceType);
+		freq = nla_get_u32(tb_msg[NL80211_ATTR_WIPHY_FREQ]);
 	}
 	else
 	{
-		instance->LogInfo("Nl80211: GET_INTERFACEs callback; MISSING iface param!");
+		instance->LogInfo("Interface FREQ attr missing");
+		freq = 0;
 	}
-*****/
+	instance->AddInterfaceToList(phyId, interfaceName, len, macAddress, interfaceType, freq);
+
 	return NL_SKIP;
 }
 

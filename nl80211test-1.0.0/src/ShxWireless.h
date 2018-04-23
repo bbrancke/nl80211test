@@ -33,7 +33,7 @@
 //   "real" value.
 #define SHX_SIOCSIWPOWER	0x8B2C		// Set Power Management settings
 #define SHX_SIOCGIWPOWER	0x8B2D		// Get Power Management settings
-#define SHX_SIOCGIWFREQ   0x8B05
+#define SHX_SIOCGIWFREQ		0x8B05
 
 // For SetWirelessPowerSaveOff(), we need to set wrq.u.power.disabled = 1;
 // 'u' is type iwreq_data, is a union of approx 5,000,000 structs.
